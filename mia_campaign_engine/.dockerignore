@@ -1,0 +1,31 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# ─── Git / IDE ────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# ─── Secrets / Env ────────────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+
+# ─── Local data / uploads ─────────────────────────────────────────────────────
+uploads/
+mia_campaign.db
+
+# ─── Gotham fonts (commercial, user-provided) ─────────────────────────────────
+# Excluded because macOS extended attributes corrupt binary files during
+# "az acr build" tar upload. The app gracefully falls back to EB Garamond.
+# To use Gotham in production: inject fonts via Azure File Share or secret mount.
+assets/fonts/gotham/
+
+# ─── Docs / misc ──────────────────────────────────────────────────────────────
+*.md
+infra/deploy.sh

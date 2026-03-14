@@ -1,0 +1,92 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mia Campaign Engine — Local Development Stack
+# Run: docker-compose up --build
+# Dashboard: http://localhost:8000
+# Flower:    http://localhost:5555
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-common-env: &common-env
+  DATABASE_URL: "sqlite+aiosqlite:////app/mia_campaign.db"
+  REDIS_URL: "redis://redis:6379/0"
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+  AZURE_STORAGE_CONN_STR: ""           # Leave empty for local dev (saves locally)
+  LOG_LEVEL: "INFO"
+  IMAGE_WORKER_CONCURRENCY: "4"
+  VIDEO_WORKER_CONCURRENCY: "2"
+  TASK_CHUNK_SIZE: "100"
+  FONT_GARAMOND_REGULAR: "/app/assets/fonts/garamond/EBGaramond-Regular.ttf"
+  FONT_GARAMOND_BOLD: "/app/assets/fonts/garamond/EBGaramond-Bold.ttf"
+  # Gotham: mount your licensed fonts via volume below
+  FONT_GOTHAM_BOLD: "/app/assets/fonts/gotham/Gotham-Bold.otf"
+  FONT_GOTHAM_MEDIUM: "/app/assets/fonts/gotham/Gotham-Medium.otf"
+
+services:
+
+  # ─── Redis ──────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes: ["redis_data:/data"]
+    command: redis-server --appendonly yes
+
+  # ─── API + Dashboard ─────────────────────────────────────────────────────
+  api:
+    build: .
+    command: ["api"]
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    depends_on: [redis]
+    environment:
+      <<: *common-env
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+      - ./data:/app/data
+      - ./assets:/app/assets
+
+  # ─── Image Worker ────────────────────────────────────────────────────────
+  worker-images:
+    build: .
+    command: ["worker-images"]
+    restart: unless-stopped
+    depends_on: [redis]
+    environment:
+      <<: *common-env
+      DATABASE_URL: "sqlite:////app/mia_campaign.db"  # sync for workers
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+      - ./assets:/app/assets
+    deploy:
+      replicas: 2   # Run 2 image workers locally
+
+  # ─── Video Worker ────────────────────────────────────────────────────────
+  worker-videos:
+    build: .
+    command: ["worker-videos"]
+    restart: unless-stopped
+    depends_on: [redis]
+    environment:
+      <<: *common-env
+      DATABASE_URL: "sqlite:////app/mia_campaign.db"
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+      - ./assets:/app/assets
+
+  # ─── Flower (Celery monitoring) ──────────────────────────────────────────
+  flower:
+    build: .
+    command: ["flower"]
+    ports: ["5555:5555"]
+    restart: unless-stopped
+    depends_on: [redis]
+    environment:
+      <<: *common-env
+
+volumes:
+  redis_data:

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Files — Mia Campaign Engine{% endblock %}
+{% block nav_files %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Generated Files</h1>
+    <p class="page-subtitle">Browse, preview, and download images &amp; videos</p>
+  </div>
+</div>
+
+<!-- ─── Filters ─────────────────────────────────────────────────────────── -->
+<div class="filter-bar card">
+  <div class="filter-row">
+    <div class="form-group inline">
+      <label>Media Type</label>
+      <select id="mediaTypeFilter" class="form-input sm" onchange="loadFiles()">
+        <option value="images">Images (PNG)</option>
+        <option value="videos">Videos (MP4)</option>
+        <option value="avatar_videos">AI Avatar Videos</option>
+      </select>
+    </div>
+    <div class="form-group inline">
+      <label>Campaign</label>
+      <select id="campaignFilter" class="form-input sm" onchange="loadFiles()">
+        <option value="">All Campaigns</option>
+      </select>
+    </div>
+    <div class="form-group inline">
+      <label>Limit</label>
+      <select id="limitFilter" class="form-input sm" onchange="loadFiles()">
+        <option value="50">50</option>
+        <option value="100" selected>100</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="loadFiles()">Refresh</button>
+    <button class="btn btn-ghost" id="bulkDownloadBtn" onclick="getBulkUrls()" style="display:none">
+      Get Bulk Download Links
+    </button>
+    <button class="btn btn-ghost" id="deleteFilesBtn" data-admin-only onclick="deleteSelectedCampaignFiles()"
+            style="display:none;color:var(--mia-danger);border-color:rgba(239,68,68,0.3)">
+      Delete Files
+    </button>
+  </div>
+</div>
+
+<!-- ─── File Count ─────────────────────────────────────────────────────── -->
+<div class="file-summary" id="fileSummary"></div>
+
+<!-- ─── Grid View ─────────────────────────────────────────────────────── -->
+<div id="fileGrid">
+  <div class="loading-placeholder">Loading campaigns...</div>
+</div>
+
+<!-- ─── Preview Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="previewModal" onclick="closePreviewModal(event)">
+  <div class="modal modal-preview">
+    <div class="modal-header">
+      <h3 id="previewTitle">Preview</h3>
+      <div class="preview-actions">
+        <a id="previewDownloadBtn" href="#" download class="btn btn-sm btn-primary">Download</a>
+        <button class="modal-close" onclick="closePreviewModal()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body preview-body" id="previewBody"></div>
+  </div>
+</div>
+
+<!-- ─── Bulk URLs Modal ──────────────────────────────────────────────── -->
+<div class="modal-overlay" id="bulkUrlsModal" onclick="closeBulkUrlsModal(event)">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <h3>Bulk Download Links</h3>
+      <button class="modal-close" onclick="closeBulkUrlsModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="text-muted" id="bulkUrlsInfo"></p>
+      <textarea id="bulkUrlsTextarea" class="bulk-urls-textarea" readonly></textarea>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="copyBulkUrls()">Copy All URLs</button>
+        <button class="btn btn-ghost" onclick="downloadBulkUrlsJson()">Download as JSON</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  initFilesPage();
+</script>
+{% endblock %}

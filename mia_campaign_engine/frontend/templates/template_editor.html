@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}Templates — Mia Campaign Engine{% endblock %}
+{% block nav_templates %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Image Templates</h1>
+    <p class="page-subtitle">Upload template images and define text zones visually</p>
+  </div>
+  <button class="btn btn-primary" onclick="openUploadModal()">+ Upload Template</button>
+</div>
+
+<!-- ─── Template List ─────────────────────────────────────────────────────── -->
+<div class="card mt-24" id="templateListCard">
+  <div class="card-header"><h2 class="card-title">All Templates</h2></div>
+  <div class="card-body p-0">
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Type</th><th>Zones configured</th><th>Actions</th></tr></thead>
+      <tbody id="templatesTbody"><tr><td colspan="4" class="loading-row">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ─── Visual Zone Editor ────────────────────────────────────────────────── -->
+<div id="editorSection" style="display:none">
+  <div class="page-header" style="margin-top:32px">
+    <div>
+      <h2 class="page-title" style="font-size:20px" id="editorTemplateName">Template Editor</h2>
+      <p class="page-subtitle">Draw text zones on the template image. Drag to define each zone.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" onclick="closeEditor()">← Back</button>
+      <button class="btn btn-ghost" onclick="previewTemplate()" id="previewBtn">Preview</button>
+      <button class="btn btn-primary" onclick="saveBoxes()" id="saveBtn">Save Zones</button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+    <!-- Canvas -->
+    <div style="flex:1;min-width:300px">
+      <div style="position:relative;display:inline-block;max-width:100%" id="canvasWrapper">
+        <img id="templateImg" src="" alt="template" style="max-width:100%;display:block;border-radius:8px;border:1px solid var(--mia-border)" onload="onImgLoad()"/>
+        <canvas id="zoneCanvas" style="position:absolute;top:0;left:0;cursor:crosshair"
+          onmousedown="onMouseDown(event)"
+          onmousemove="onMouseMove(event)"
+          onmouseup="onMouseUp(event)"></canvas>
+      </div>
+      <p style="font-size:11px;color:var(--mia-muted);margin-top:8px">
+        Select a zone type on the right, then drag on the image to draw it.
+      </p>
+    </div>
+
+    <!-- Zone Controls -->
+    <div style="min-width:260px;display:flex;flex-direction:column;gap:12px" id="zonePanel">
+      <!-- Active zone selector -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="zone-btn active" data-zone="heading"    onclick="selectZone('heading')"    style="border-left:4px solid #3B82F6">Heading</button>
+        <button class="zone-btn"        data-zone="subheading" onclick="selectZone('subheading')" style="border-left:4px solid #22C55E">Subheading</button>
+        <button class="zone-btn"        data-zone="body"       onclick="selectZone('body')"       style="border-left:4px solid #F97316">Body</button>
+        <button class="zone-btn"        data-zone="cta"        onclick="selectZone('cta')"        style="border-left:4px solid #A855F7">CTA</button>
+      </div>
+
+      <!-- Per-zone coordinate inputs -->
+      <div id="zoneDetails"></div>
+
+      <!-- Preview result -->
+      <div id="previewResult" style="display:none">
+        <p style="font-size:12px;color:var(--mia-muted);margin-bottom:6px">Preview:</p>
+        <img id="previewImg" src="" alt="preview" style="max-width:100%;border-radius:6px;border:1px solid var(--mia-border)"/>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Upload Modal ──────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="uploadModal" onclick="closeUploadModal(event)">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h3>Upload Template Image</h3>
+      <button class="modal-close" onclick="closeUploadModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Template Name</label>
+        <input type="text" id="uploadName" class="form-input" placeholder="e.g. Birthday Gold Template"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Image File (JPG / PNG / WEBP)</label>
+        <input type="file" id="uploadFile" class="form-input" accept=".jpg,.jpeg,.png,.webp"/>
+      </div>
+      <div id="uploadError" style="color:var(--mia-danger);font-size:12px;display:none"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--mia-border)">
+      <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="doUpload()" id="uploadSubmitBtn">Upload</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.zone-btn {
+  background: var(--mia-card);
+  border: 1px solid var(--mia-border);
+  color: var(--mia-text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+.zone-btn.active { background: rgba(59,130,246,0.15); }
+.zone-input-group { display:flex;flex-direction:column;gap:4px;background:var(--mia-card);border:1px solid var(--mia-border);border-radius:8px;padding:10px 12px; }
+.zone-input-row { display:flex;gap:6px;align-items:center; }
+.zone-input-row label { font-size:11px;color:var(--mia-muted);width:32px;flex-shrink:0; }
+.zone-input-row input[type=number] { flex:1;background:var(--mia-bg);border:1px solid var(--mia-border);border-radius:4px;color:var(--mia-text);padding:3px 6px;font-size:12px;min-width:0; }
+.zone-input-row input[type=color] { flex:1;height:26px;border-radius:4px;border:1px solid var(--mia-border);cursor:pointer;background:var(--mia-bg); }
+</style>
+
+<script>
+let currentTemplateId = null;
+let displayScale = 1;   // canvas px / image px
+let activeZone = "heading";
+let drawing = false;
+let drawStart = {x:0, y:0};
+
+// Boxes: stored in real image pixel coords
+const ZONES = ["heading", "subheading", "body", "cta"];
+const ZONE_COLORS = {
+  heading:    "rgba(59,130,246,0.5)",
+  subheading: "rgba(34,197,94,0.5)",
+  body:       "rgba(249,115,22,0.5)",
+  cta:        "rgba(168,85,247,0.5)",
+};
+const ZONE_BORDER = {
+  heading:    "#3B82F6",
+  subheading: "#22C55E",
+  body:       "#F97316",
+  cta:        "#A855F7",
+};
+
+let boxes = {
+  heading:    {x:50, y:50,  w:500, h:150, max_pt:64, color:"#ffffff"},
+  subheading: {x:50, y:220, w:500, h:80,  max_pt:32, color:"#ffffff"},
+  body:       {x:50, y:320, w:500, h:120, max_pt:26, color:"#ffffff"},
+  cta:        {x:50, y:460, w:500, h:60,  max_pt:22, color:"#ffe696"},
+};
+
+// ─── Load templates list ────────────────────────────────────────────────────
+
+async function loadTemplates() {
+  try {
+    const data = await apiFetch("/api/templates");
+    const tbody = document.getElementById("templatesTbody");
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="loading-row">No templates yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(t => {
+      const zonesCount = t.text_boxes ? Object.keys(JSON.parse(t.text_boxes)).length : 0;
+      const tag = t.is_builtin
+        ? '<span class="badge badge-pending">Built-in</span>'
+        : '<span class="badge badge-done">Custom</span>';
+      const del = !t.is_builtin
+        ? `<button class="btn btn-sm" style="background:rgba(239,68,68,0.1);color:#F87171" onclick="deleteTemplate('${t.id}','${escHtml(t.name)}')">Delete</button>`
+        : "";
+      return `<tr>
+        <td><strong>${escHtml(t.name)}</strong></td>
+        <td>${tag}</td>
+        <td>${zonesCount} / 4 zones configured</td>
+        <td><div style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-primary" onclick="openEditor('${t.id}','${escHtml(t.name)}')">Edit Zones</button>
+          ${del}
+        </div></td>
+      </tr>`;
+    }).join("");
+  } catch(e) { console.error(e); }
+}
+
+// ─── Upload modal ────────────────────────────────────────────────────────────
+
+function openUploadModal() {
+  document.getElementById("uploadModal").classList.add("open");
+  document.getElementById("uploadName").value = "";
+  document.getElementById("uploadFile").value = "";
+  document.getElementById("uploadError").style.display = "none";
+}
+function closeUploadModal(e) {
+  if (!e || e.target === e.currentTarget) {
+    document.getElementById("uploadModal").classList.remove("open");
+  }
+}
+
+async function doUpload() {
+  const name = document.getElementById("uploadName").value.trim();
+  const file = document.getElementById("uploadFile").files[0];
+  const errEl = document.getElementById("uploadError");
+  errEl.style.display = "none";
+
+  if (!name) { errEl.textContent = "Please enter a template name."; errEl.style.display = "block"; return; }
+  if (!file)  { errEl.textContent = "Please select an image file.";  errEl.style.display = "block"; return; }
+
+  const btn = document.getElementById("uploadSubmitBtn");
+  btn.textContent = "Uploading..."; btn.disabled = true;
+
+  try {
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("image", file);
+    const res = await fetch("/api/templates", { method: "POST", body: fd, headers: apiAuthHeaders() });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail || "Upload failed"); }
+    const tmpl = await res.json();
+    closeUploadModal();
+    await loadTemplates();
+    openEditor(tmpl.id, tmpl.name);  // immediately open editor
+  } catch(e) {
+    errEl.textContent = e.message; errEl.style.display = "block";
+  } finally {
+    btn.textContent = "Upload"; btn.disabled = false;
+  }
+}
+
+// ─── Zone editor ─────────────────────────────────────────────────────────────
+
+async function openEditor(templateId, name) {
+  currentTemplateId = templateId;
+  document.getElementById("editorTemplateName").textContent = `Editing: ${name}`;
+  document.getElementById("editorSection").style.display = "block";
+  document.getElementById("templateListCard").style.display = "none";
+  document.getElementById("previewResult").style.display = "none";
+
+  // Try to load current boxes from API
+  try {
+    const data = await apiFetch("/api/templates");
+    const tmpl = data.find(t => t.id === templateId);
+    if (tmpl && tmpl.text_boxes) {
+      const saved = JSON.parse(tmpl.text_boxes);
+      ZONES.forEach(z => { if (saved[z]) boxes[z] = {...boxes[z], ...saved[z]}; });
+    }
+  } catch(e) {}
+
+  // Load image
+  document.getElementById("templateImg").src = `/api/templates/${templateId}/image?t=${Date.now()}`;
+  selectZone("heading");
+}
+
+function closeEditor() {
+  document.getElementById("editorSection").style.display = "none";
+  document.getElementById("templateListCard").style.display = "block";
+  currentTemplateId = null;
+}
+
+function onImgLoad() {
+  const img = document.getElementById("templateImg");
+  const canvas = document.getElementById("zoneCanvas");
+  canvas.width  = img.clientWidth;
+  canvas.height = img.clientHeight;
+  displayScale  = img.clientWidth / img.naturalWidth;
+  redraw();
+}
+
+// ─── Canvas drawing ────────────────────────────────────────────────────────
+
+function canvasCoords(e) {
+  const canvas = document.getElementById("zoneCanvas");
+  const rect   = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) / displayScale,
+    y: (e.clientY - rect.top)  / displayScale,
+  };
+}
+
+function onMouseDown(e) {
+  drawing = true;
+  drawStart = canvasCoords(e);
+}
+
+function onMouseMove(e) {
+  if (!drawing) return;
+  const cur = canvasCoords(e);
+  // Live preview of the box being drawn
+  const canvas = document.getElementById("zoneCanvas");
+  const ctx = canvas.getContext("2d");
+  redraw(ctx);
+
+  const x = Math.min(drawStart.x, cur.x) * displayScale;
+  const y = Math.min(drawStart.y, cur.y) * displayScale;
+  const w = Math.abs(cur.x - drawStart.x) * displayScale;
+  const h = Math.abs(cur.y - drawStart.y) * displayScale;
+  ctx.strokeStyle = ZONE_BORDER[activeZone];
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+  ctx.fillStyle = ZONE_COLORS[activeZone];
+  ctx.fillRect(x, y, w, h);
+}
+
+function onMouseUp(e) {
+  if (!drawing) return;
+  drawing = false;
+  const cur = canvasCoords(e);
+
+  const x = Math.round(Math.min(drawStart.x, cur.x));
+  const y = Math.round(Math.min(drawStart.y, cur.y));
+  const w = Math.round(Math.abs(cur.x - drawStart.x));
+  const h = Math.round(Math.abs(cur.y - drawStart.y));
+
+  if (w > 5 && h > 5) {
+    boxes[activeZone] = { ...boxes[activeZone], x, y, w, h };
+    renderZoneInputs(activeZone);
+    redraw();
+    // Auto-advance to next zone
+    const idx = ZONES.indexOf(activeZone);
+    if (idx < ZONES.length - 1) selectZone(ZONES[idx + 1]);
+  }
+}
+
+function redraw(ctx) {
+  const canvas = document.getElementById("zoneCanvas");
+  ctx = ctx || canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ZONES.forEach(zone => {
+    const b = boxes[zone];
+    if (!b || !b.w || !b.h) return;
+    const x = b.x * displayScale;
+    const y = b.y * displayScale;
+    const w = b.w * displayScale;
+    const h = b.h * displayScale;
+
+    ctx.fillStyle = ZONE_COLORS[zone];
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = ZONE_BORDER[zone];
+    ctx.lineWidth = zone === activeZone ? 2.5 : 1.5;
+    ctx.strokeRect(x, y, w, h);
+
+    // Label
+    ctx.fillStyle = ZONE_BORDER[zone];
+    ctx.font = "bold 11px Inter, sans-serif";
+    ctx.fillText(zone.toUpperCase(), x + 4, y + 14);
+  });
+}
+
+// ─── Zone input panel ────────────────────────────────────────────────────────
+
+function selectZone(zone) {
+  activeZone = zone;
+  document.querySelectorAll(".zone-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.zone === zone);
+  });
+  renderZoneInputs(zone);
+  redraw();
+}
+
+function renderZoneInputs(zone) {
+  const b   = boxes[zone];
+  const col = ZONE_BORDER[zone];
+  document.getElementById("zoneDetails").innerHTML = `
+    <div class="zone-input-group">
+      <div style="font-size:12px;font-weight:600;color:${col};margin-bottom:6px;text-transform:uppercase">${zone}</div>
+      <div class="zone-input-row"><label>X</label><input type="number" id="z_x"  value="${b.x}"      oninput="updateBox('${zone}','x',this.value)"/></div>
+      <div class="zone-input-row"><label>Y</label><input type="number" id="z_y"  value="${b.y}"      oninput="updateBox('${zone}','y',this.value)"/></div>
+      <div class="zone-input-row"><label>W</label><input type="number" id="z_w"  value="${b.w}"      oninput="updateBox('${zone}','w',this.value)"/></div>
+      <div class="zone-input-row"><label>H</label><input type="number" id="z_h"  value="${b.h}"      oninput="updateBox('${zone}','h',this.value)"/></div>
+      <div class="zone-input-row"><label>Pt</label><input type="number" id="z_pt" value="${b.max_pt}" oninput="updateBox('${zone}','max_pt',this.value)" title="Max font size (pt)"/></div>
+      <div class="zone-input-row"><label>Color</label><input type="color" id="z_color" value="${b.color}" oninput="updateBox('${zone}','color',this.value)"/></div>
+      <div style="margin-top:4px">
+        <button class="btn btn-sm btn-ghost" style="font-size:11px" onclick="clearZone('${zone}')">Clear Zone</button>
+      </div>
+    </div>
+  `;
+}
+
+function updateBox(zone, field, val) {
+  if (field === "color") {
+    boxes[zone][field] = val;
+  } else {
+    boxes[zone][field] = parseInt(val) || 0;
+  }
+  redraw();
+}
+
+function clearZone(zone) {
+  boxes[zone] = { x:0, y:0, w:0, h:0, max_pt: boxes[zone].max_pt, color: boxes[zone].color };
+  renderZoneInputs(zone);
+  redraw();
+}
+
+// ─── Save boxes ──────────────────────────────────────────────────────────────
+
+async function saveBoxes() {
+  if (!currentTemplateId) return;
+  const btn = document.getElementById("saveBtn");
+  btn.textContent = "Saving..."; btn.disabled = true;
+  try {
+    const res = await fetch(`/api/templates/${currentTemplateId}/boxes`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(boxes),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    btn.textContent = "Saved ✓";
+    setTimeout(() => { btn.textContent = "Save Zones"; btn.disabled = false; }, 2000);
+  } catch(e) {
+    alert("Save failed: " + e.message);
+    btn.textContent = "Save Zones"; btn.disabled = false;
+  }
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+
+async function previewTemplate() {
+  if (!currentTemplateId) return;
+  const btn = document.getElementById("previewBtn");
+  btn.textContent = "Rendering..."; btn.disabled = true;
+
+  // Save first to ensure current boxes are used
+  try {
+    await fetch(`/api/templates/${currentTemplateId}/boxes`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...apiAuthHeaders() },
+      body: JSON.stringify(boxes),
+    });
+  } catch(e) {}
+
+  try {
+    const res = await fetch(`/api/templates/${currentTemplateId}/preview`, {
+      method: "POST",
+      headers: apiAuthHeaders(),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.detail || "Preview failed"); }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    document.getElementById("previewImg").src = url;
+    document.getElementById("previewResult").style.display = "block";
+  } catch(e) {
+    alert("Preview failed: " + e.message);
+  } finally {
+    btn.textContent = "Preview"; btn.disabled = false;
+  }
+}
+
+// ─── Delete template ─────────────────────────────────────────────────────────
+
+async function deleteTemplate(id, name) {
+  if (!confirm(`Delete template "${name}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/templates/${id}`, { method: "DELETE", headers: apiAuthHeaders() });
+    if (!res.ok) throw new Error((await res.json()).detail || "Delete failed");
+    await loadTemplates();
+  } catch(e) { alert("Delete failed: " + e.message); }
+}
+
+// ─── Auth header helper (reuse existing pattern) ─────────────────────────────
+function apiAuthHeaders() {
+  const token = localStorage.getItem("mia_token");
+  if (token) return { "Authorization": `Bearer ${token}` };
+  return {};
+}
+
+loadTemplates();
+</script>
+{% endblock %}

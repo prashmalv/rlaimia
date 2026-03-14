@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Mia Campaign Engine</title>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--mia-bg); }
+    .login-card {
+      width:360px; padding:40px 36px; background:var(--mia-surface);
+      border:1px solid var(--mia-border); border-radius:16px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.3);
+    }
+    .login-logo { text-align:center; margin-bottom:32px; }
+    .login-logo .logo-mia { font-family:'EB Garamond',serif; font-size:38px; color:var(--mia-gold); letter-spacing:0.12em; }
+    .login-logo .logo-sub { display:block; font-size:12px; color:var(--mia-muted); letter-spacing:0.08em; text-transform:uppercase; margin-top:2px; }
+    .login-form .form-group { margin-bottom:20px; }
+    .login-form label { display:block; font-size:12px; font-weight:500; color:var(--mia-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em; }
+    .login-form .form-input { width:100%; box-sizing:border-box; }
+    .login-btn { width:100%; padding:12px; font-size:14px; font-weight:600; }
+    .login-error { color:var(--mia-danger); font-size:13px; margin-top:12px; text-align:center; display:none; }
+    .login-hint { color:var(--mia-muted); font-size:11px; text-align:center; margin-top:20px; line-height:1.6; }
+    .role-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600; }
+    .role-badge.admin { background:rgba(212,175,55,0.15); color:var(--mia-gold); }
+    .role-badge.viewer { background:rgba(156,163,175,0.15); color:#9CA3AF; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="logo-mia">mia</span>
+      <span class="logo-sub">Campaign Engine</span>
+    </div>
+    <form class="login-form" id="loginForm" onsubmit="doLogin(event)">
+      <div class="form-group">
+        <label for="passwordInput">Password</label>
+        <input id="passwordInput" type="password" class="form-input" placeholder="Enter your password" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn btn-primary login-btn" id="loginBtn">
+        <span id="loginBtnText">Sign In</span>
+      </button>
+      <div class="login-error" id="loginError">Invalid password. Please try again.</div>
+    </form>
+    <div class="login-hint">
+      <span class="role-badge admin">Admin</span> — create campaigns, delete files<br/>
+      <span class="role-badge viewer">Viewer</span> — browse &amp; download only
+    </div>
+  </div>
+
+  <script>
+    // If already logged in, redirect to dashboard
+    const stored = localStorage.getItem("mia_auth");
+    if (stored) {
+      try {
+        const auth = JSON.parse(stored);
+        if (auth.token) window.location.href = "/";
+      } catch(e) {}
+    }
+
+    async function doLogin(e) {
+      e.preventDefault();
+      const btn  = document.getElementById("loginBtn");
+      const text = document.getElementById("loginBtnText");
+      const err  = document.getElementById("loginError");
+      const pw   = document.getElementById("passwordInput").value;
+
+      btn.disabled = true;
+      text.textContent = "Signing in...";
+      err.style.display = "none";
+
+      try {
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({password: pw}),
+        });
+        if (!resp.ok) {
+          err.style.display = "block";
+          return;
+        }
+        const data = await resp.json();
+        localStorage.setItem("mia_auth", JSON.stringify({role: data.role, token: data.token}));
+        window.location.href = "/";
+      } catch(ex) {
+        err.textContent = "Network error. Please try again.";
+        err.style.display = "block";
+      } finally {
+        btn.disabled = false;
+        text.textContent = "Sign In";
+      }
+    }
+  </script>
+</body>
+</html>

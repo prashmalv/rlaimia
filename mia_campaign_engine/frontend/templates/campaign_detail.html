@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Campaign Detail — Mia Campaign Engine{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="/" class="btn btn-ghost btn-sm" style="margin-bottom:10px">← Back</a>
+    <h1 class="page-title" id="campaignName">Loading...</h1>
+    <p class="page-subtitle" id="campaignMeta"></p>
+  </div>
+  <div style="display:flex;gap:8px" id="campaignActions"></div>
+</div>
+
+<!-- ─── Progress Overview ────────────────────────────────────────────────── -->
+<div class="stats-grid" id="detailStats"></div>
+
+<!-- ─── Jobs Table ──────────────────────────────────────────────────────── -->
+<div class="card mt-24">
+  <div class="card-header">
+    <h2 class="card-title">Jobs</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="jobStatusFilter" class="form-input sm" onchange="loadJobs(1)">
+        <option value="">All</option>
+        <option value="queued">Queued</option>
+        <option value="processing">Processing</option>
+        <option value="done">Done</option>
+        <option value="partial">Partial</option>
+        <option value="failed">Failed</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <button class="btn btn-sm btn-ghost" onclick="loadJobs(currentPage)">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <table class="data-table" id="jobsTable">
+      <thead>
+        <tr>
+          <th>Person</th><th>Persona</th><th>Phase</th>
+          <th id="imgTh">Image</th><th id="vidTh">Video</th><th id="heygenTh" style="display:none">AI Avatar</th><th>Status</th><th>Preview</th>
+        </tr>
+      </thead>
+      <tbody id="jobsTbody">
+        <tr><td colspan="9" class="loading-row">Loading jobs...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="pagination" style="padding:12px 20px;display:flex;gap:8px;justify-content:center"></div>
+</div>
+
+<!-- ─── Preview Modal ─────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="previewModal" onclick="closePreviewModal(event)">
+  <div class="modal modal-preview">
+    <div class="modal-header">
+      <h3 id="previewTitle">Preview</h3>
+      <div class="preview-actions">
+        <a id="previewDownloadBtn" href="#" download class="btn btn-sm btn-primary">Download</a>
+        <button class="modal-close" onclick="closePreviewModal()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body preview-body" id="previewBody"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const CAMPAIGN_ID = "{{ campaign_id }}";
+  let currentPage   = 1;
+
+  let _heygenEnabled = false;
+  let _imgEnabled    = true;
+  let _vidEnabled    = true;
+
+  async function loadCampaignDetail() {
+    try {
+      const [c, s] = await Promise.all([
+        apiFetch(`/api/jobs/campaign/${CAMPAIGN_ID}`),
+        apiFetch(`/api/jobs/campaign/${CAMPAIGN_ID}/stats`),
+      ]);
+      _heygenEnabled = s.heygen_enabled || false;
+      _imgEnabled    = c.generate_images !== false;
+      _vidEnabled    = c.generate_videos !== false;
+      // Show/hide column headers
+      document.getElementById("imgTh").style.display    = _imgEnabled    ? "" : "none";
+      document.getElementById("vidTh").style.display    = _vidEnabled    ? "" : "none";
+      document.getElementById("heygenTh").style.display = _heygenEnabled ? "" : "none";
+
+      document.getElementById("campaignName").textContent = c.name;
+      document.getElementById("campaignMeta").textContent =
+        `Created: ${fmtDate(c.created_at)} · Type: ${c.event_type} · ${statusBadge(c.status).replace(/<[^>]+>/g, c.status)}`;
+
+      const actions = document.getElementById("campaignActions");
+      actions.innerHTML = c.status === "running"
+        ? `<button class="btn btn-ghost" onclick="pauseCampaign('${CAMPAIGN_ID}')">Pause</button>`
+        : c.status === "paused"
+        ? `<button class="btn btn-primary" onclick="resumeCampaign('${CAMPAIGN_ID}')">Resume</button>`
+        : "";
+
+      document.getElementById("detailStats").innerHTML = `
+        <div class="stat-card"><div class="stat-info">
+          <div class="stat-value">${fmtNumber(c.total_jobs)}</div><div class="stat-label">Total Jobs</div>
+        </div></div>
+        <div class="stat-card"><div class="stat-info">
+          <div class="stat-value" style="color:var(--mia-success)">${fmtNumber(c.completed_jobs)}</div><div class="stat-label">Completed</div>
+        </div></div>
+        <div class="stat-card"><div class="stat-info">
+          <div class="stat-value" style="color:var(--mia-danger)">${fmtNumber(c.failed_jobs)}</div><div class="stat-label">Failed</div>
+        </div></div>
+        <div class="stat-card"><div class="stat-info">
+          <div class="stat-value" style="color:var(--mia-success)">${fmtNumber(s.images_done)}</div><div class="stat-label">Images Done</div>
+        </div></div>
+        <div class="stat-card"><div class="stat-info">
+          <div class="stat-value" style="color:#60A5FA">${fmtNumber(s.videos_done)}</div><div class="stat-label">Videos Done</div>
+        </div></div>
+        ${s.heygen_enabled ? `<div class="stat-card"><div class="stat-info">
+          <div class="stat-value" style="color:#A78BFA">${fmtNumber(s.heygen_done)}</div><div class="stat-label">AI Avatar Done</div>
+        </div></div>` : ""}
+        <div class="stat-card"><div class="stat-info">
+          ${progressBar(c.progress_pct)}<div class="stat-label" style="margin-top:4px">Progress</div>
+        </div></div>
+      `;
+    } catch(e) { console.error(e); }
+  }
+
+  async function loadJobs(page) {
+    currentPage = page || 1;
+    const status = document.getElementById("jobStatusFilter").value;
+    const params = new URLSearchParams({ page: currentPage, page_size: 50 });
+    if (status) params.set("status", status);
+
+    try {
+      const data = await apiFetch(`/api/jobs/campaign/${CAMPAIGN_ID}/jobs?${params}`);
+      const tbody = document.getElementById("jobsTbody");
+
+      const colCount = 5 + (_imgEnabled ? 1 : 0) + (_vidEnabled ? 1 : 0) + (_heygenEnabled ? 1 : 0);
+      tbody.innerHTML = data.items.map(j => {
+        const errTip = j.error_msg ? ` title="${escHtml(j.error_msg)}" style="cursor:help"` : "";
+        const overallBadge = j.error_msg
+          ? `<span class="badge badge-${j.status}"${errTip}>⚠ ${j.status}</span>`
+          : statusBadge(j.status);
+        const imgCell    = _imgEnabled
+          ? `<td>${statusBadge(j.image_status)}</td>` : "";
+        const vidCell    = _vidEnabled
+          ? `<td>${statusBadge(j.video_status)}</td>` : "";
+        const heygenCell = _heygenEnabled
+          ? `<td>${j.heygen_video_status ? statusBadge(j.heygen_video_status) : '<span style="color:var(--mia-muted);font-size:11px">—</span>'}</td>`
+          : "";
+        return `
+        <tr>
+          <td><strong>${escHtml(j.first_name)}</strong><br/><span style="font-size:11px;color:var(--mia-muted)">${escHtml(j.person_name)}</span></td>
+          <td style="font-size:11px;color:var(--mia-muted)">${escHtml(j.persona || "—")}</td>
+          <td><span class="badge badge-pending">${j.phase || "—"}</span></td>
+          ${imgCell}
+          ${vidCell}
+          ${heygenCell}
+          <td>${overallBadge}</td>
+          <td>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              ${j.image_url ? `<button class="btn btn-sm btn-ghost" onclick='previewFile("image","${escHtml(j.image_url)}","${escHtml(j.first_name)}_img")'>Img</button>` : ""}
+              ${j.video_url ? `<button class="btn btn-sm btn-ghost" onclick='previewFile("video","${escHtml(j.video_url)}","${escHtml(j.first_name)}_vid")'>Vid</button>` : ""}
+              ${j.heygen_video_url ? `<button class="btn btn-sm btn-ghost" style="color:#A78BFA;border-color:rgba(167,139,250,0.3)" onclick='previewFile("video","${escHtml(j.heygen_video_url)}","${escHtml(j.first_name)}_ai")'>AI</button>` : ""}
+              ${j.error_msg ? `<button class="btn btn-sm" style="background:rgba(239,68,68,0.1);color:#F87171;font-size:10px" onclick="alert(${JSON.stringify(j.error_msg)})">Error</button>` : ""}
+            </div>
+          </td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="${colCount}" class="loading-row">No jobs match filter.</td></tr>`;
+
+      // Pagination
+      const totalPages = Math.ceil(data.total / data.page_size);
+      const pag = document.getElementById("pagination");
+      pag.innerHTML = "";
+      for (let p = 1; p <= Math.min(totalPages, 20); p++) {
+        const btn = document.createElement("button");
+        btn.className = `btn btn-sm ${p === currentPage ? "btn-primary" : "btn-ghost"}`;
+        btn.textContent = p;
+        btn.onclick = () => loadJobs(p);
+        pag.appendChild(btn);
+      }
+      if (totalPages > 20) {
+        pag.innerHTML += `<span style="color:var(--mia-muted);font-size:12px">... ${totalPages} total pages</span>`;
+      }
+    } catch(e) { console.error(e); }
+  }
+
+  function closePreviewModal(e) {
+    if (!e || e.target === e.currentTarget) {
+      document.getElementById("previewModal").classList.remove("open");
+      document.getElementById("previewBody").innerHTML = "";
+    }
+  }
+
+  loadCampaignDetail();
+  loadJobs(1);
+  setInterval(() => { loadCampaignDetail(); loadJobs(currentPage); }, 10000);
+</script>
+{% endblock %}

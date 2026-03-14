@@ -1,0 +1,33 @@
+# Secrets
+.env
+.deploy-output
+.deploy-state
+*.pem *.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+tvenv*/
+.venv/
+
+# DB
+*.db
+*.db-shm
+*.db-wal
+
+# Output / uploads
+uploads/
+output/
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Fonts (licensed — do not commit)
+assets/fonts/gotham/
