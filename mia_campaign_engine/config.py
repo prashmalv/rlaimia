@@ -76,6 +76,40 @@ FONT_LATO_REGULAR     = os.getenv("FONT_LATO_REGULAR",     f"{_LT}/Lato-Regular.
 FONT_LATO_BOLD        = os.getenv("FONT_LATO_BOLD",        f"{_LT}/Lato-Bold.ttf")
 FONT_LATO_ITALIC      = os.getenv("FONT_LATO_ITALIC",      f"{_LT}/Lato-Italic.ttf")
 
+# ─── Font name → path resolver (used by template editor font picker) ─────────
+# Maps the short font key stored in boxes JSON → actual TTF path on disk.
+# Keys are lowercase identifiers used in the template editor dropdown.
+FONT_MAP: dict[str, str] = {
+    "playfair_bold":    FONT_PLAYFAIR_BOLD,
+    "playfair_regular": FONT_PLAYFAIR_REGULAR,
+    "lato_regular":     FONT_LATO_REGULAR,
+    "lato_bold":        FONT_LATO_BOLD,
+    "lato_italic":      FONT_LATO_ITALIC,
+    "garamond_regular": FONT_GARAMOND_REGULAR,
+    "garamond_bold":    FONT_GARAMOND_BOLD,
+    "garamond_italic":  FONT_GARAMOND_ITALIC,
+    # Gotham — included in map; will be empty path on Docker (excluded), _get_font falls back gracefully
+    "gotham_bold":      FONT_GOTHAM_BOLD,
+    "gotham_medium":    FONT_GOTHAM_MEDIUM,
+    "gotham_book":      FONT_GOTHAM_BOOK,
+}
+
+# Default fonts per zone (used when boxes JSON has no "font" key)
+FONT_ZONE_DEFAULTS: dict[str, str] = {
+    "heading":    FONT_PLAYFAIR_BOLD,
+    "subheading": FONT_PLAYFAIR_REGULAR,
+    "body":       FONT_LATO_REGULAR,
+    "cta":        FONT_LATO_ITALIC,
+}
+
+
+def zone_font_path(zone: str, font_key: str | None) -> str:
+    """Resolve font path for a template zone. Returns config path for that zone."""
+    if font_key and font_key in FONT_MAP:
+        return FONT_MAP[font_key]
+    return FONT_ZONE_DEFAULTS.get(zone, FONT_LATO_REGULAR)
+
+
 # ─── Image Templates ──────────────────────────────────────────────────────────
 # Map of template_id → template config (override via JSON in env or extend in code)
 IMAGE_TEMPLATES_DIR   = ASSETS_DIR / "image_templates"
@@ -148,8 +182,20 @@ HEYGEN_VOICE_ID_FEMALE = os.getenv("HEYGEN_VOICE_ID_FEMALE", "2d5b0e6cf36f460aa7
 HEYGEN_VOICE_ID_MALE   = os.getenv("HEYGEN_VOICE_ID_MALE",   "")   # Set via env; falls back to HEYGEN_VOICE_ID
 HEYGEN_VIDEO_W     = int(os.getenv("HEYGEN_VIDEO_W", "1280"))
 HEYGEN_VIDEO_H     = int(os.getenv("HEYGEN_VIDEO_H", "720"))
+
+# Orientation presets — override per campaign via video_orientation field
+HEYGEN_ORIENTATION_DIMS = {
+    "landscape": (1280, 720),
+    "portrait":  (720, 1280),
+    "square":    (720, 720),
+}
 HEYGEN_POLL_SECS   = int(os.getenv("HEYGEN_POLL_SECS", "5"))    # seconds between polls
 HEYGEN_TIMEOUT     = int(os.getenv("HEYGEN_TIMEOUT",   "300"))   # max wait per video (s)
+
+# ─── ElevenLabs TTS (optional — used instead of Heygen built-in TTS) ──────────
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+# Model: eleven_multilingual_v2 for multi-language, eleven_monolingual_v1 for English-only
+ELEVENLABS_MODEL   = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 LOG_LEVEL          = os.getenv("LOG_LEVEL", "INFO")

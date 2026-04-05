@@ -286,38 +286,39 @@ def generate_image(job: dict, template_id: str = "template_1", custom_config: Op
     body_text       = lines.get("body", "")
     cta_text        = lines.get("cta", "")
 
-    # Heading — Playfair Display Bold (elegant serif; Gotham if available)
+    # Per-zone font: custom_config boxes may carry a "font" key (e.g. "lato_bold").
+    # Falls back to zone defaults (Playfair heading, Lato body) if not set.
+    def _zone_font(zone: str, box_cfg: dict) -> str:
+        return config.zone_font_path(zone, box_cfg.get("font") if isinstance(box_cfg, dict) else None)
+
     _draw_text_in_box(
         draw, heading_text,
         cfg["heading_box"],
-        font_path=config.FONT_PLAYFAIR_BOLD,
+        font_path=_zone_font("heading", cfg.get("heading_box", {})),
         max_size=cfg["heading_max_pt"],
         fill=cfg["heading_color"],
     )
 
-    # Sub-heading — Playfair Display Regular
     _draw_text_in_box(
         draw, subheading_text,
         cfg["subheading_box"],
-        font_path=config.FONT_PLAYFAIR_REGULAR,
+        font_path=_zone_font("subheading", cfg.get("subheading_box", {})),
         max_size=cfg["subheading_max_pt"],
         fill=cfg["heading_color"],
     )
 
-    # Body — Lato Regular (clean, readable sans-serif)
     _draw_text_in_box(
         draw, body_text,
         cfg["body_box"],
-        font_path=config.FONT_LATO_REGULAR,
+        font_path=_zone_font("body", cfg.get("body_box", {})),
         max_size=cfg["body_max_pt"],
         fill=cfg["body_color"],
     )
 
-    # CTA — Lato Italic (or EB Garamond Italic via fallback)
     _draw_text_in_box(
         draw, cta_text,
         cfg["cta_box"],
-        font_path=config.FONT_LATO_ITALIC,
+        font_path=_zone_font("cta", cfg.get("cta_box", {})),
         max_size=cfg["cta_max_pt"],
         fill=cfg["cta_color"],
     )

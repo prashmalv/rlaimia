@@ -142,10 +142,10 @@ const ZONE_BORDER = {
 };
 
 let boxes = {
-  heading:    {x:50, y:50,  w:500, h:150, max_pt:64, color:"#ffffff"},
-  subheading: {x:50, y:220, w:500, h:80,  max_pt:32, color:"#ffffff"},
-  body:       {x:50, y:320, w:500, h:120, max_pt:26, color:"#ffffff"},
-  cta:        {x:50, y:460, w:500, h:60,  max_pt:22, color:"#ffe696"},
+  heading:    {x:50, y:50,  w:500, h:150, max_pt:64, color:"#ffffff", font:""},
+  subheading: {x:50, y:220, w:500, h:80,  max_pt:32, color:"#ffffff", font:""},
+  body:       {x:50, y:320, w:500, h:120, max_pt:26, color:"#ffffff", font:""},
+  cta:        {x:50, y:460, w:500, h:60,  max_pt:22, color:"#ffe696", font:""},
 };
 
 // ─── Load templates list ────────────────────────────────────────────────────
@@ -367,6 +367,32 @@ function renderZoneInputs(zone) {
       <div class="zone-input-row"><label>H</label><input type="number" id="z_h"  value="${b.h}"      oninput="updateBox('${zone}','h',this.value)"/></div>
       <div class="zone-input-row"><label>Pt</label><input type="number" id="z_pt" value="${b.max_pt}" oninput="updateBox('${zone}','max_pt',this.value)" title="Max font size (pt)"/></div>
       <div class="zone-input-row"><label>Color</label><input type="color" id="z_color" value="${b.color}" oninput="updateBox('${zone}','color',this.value)"/></div>
+      <div class="zone-input-row" style="align-items:flex-start;flex-direction:column;gap:3px">
+        <label style="width:auto;font-size:11px;color:var(--mia-muted)">Font</label>
+        <select id="z_font" style="width:100%;background:var(--mia-bg);border:1px solid var(--mia-border);border-radius:4px;color:var(--mia-text);padding:3px 6px;font-size:12px"
+                onchange="updateBox('${zone}','font',this.value)">
+          <option value=""          ${!b.font||b.font===''?'selected':''}>Default (zone preset)</option>
+          <optgroup label="Playfair Display (Serif — Headings)">
+            <option value="playfair_bold"    ${b.font==='playfair_bold'?'selected':''}>Playfair Bold</option>
+            <option value="playfair_regular" ${b.font==='playfair_regular'?'selected':''}>Playfair Regular</option>
+          </optgroup>
+          <optgroup label="Lato (Sans-serif — Body/Name)">
+            <option value="lato_regular" ${b.font==='lato_regular'?'selected':''}>Lato Regular</option>
+            <option value="lato_bold"    ${b.font==='lato_bold'?'selected':''}>Lato Bold</option>
+            <option value="lato_italic"  ${b.font==='lato_italic'?'selected':''}>Lato Italic</option>
+          </optgroup>
+          <optgroup label="EB Garamond (Serif — Elegant Body)">
+            <option value="garamond_regular" ${b.font==='garamond_regular'?'selected':''}>Garamond Regular</option>
+            <option value="garamond_bold"    ${b.font==='garamond_bold'?'selected':''}>Garamond Bold</option>
+            <option value="garamond_italic"  ${b.font==='garamond_italic'?'selected':''}>Garamond Italic</option>
+          </optgroup>
+          <optgroup label="Gotham (Brand — if available)">
+            <option value="gotham_bold"   ${b.font==='gotham_bold'?'selected':''}>Gotham Bold</option>
+            <option value="gotham_medium" ${b.font==='gotham_medium'?'selected':''}>Gotham Medium</option>
+            <option value="gotham_book"   ${b.font==='gotham_book'?'selected':''}>Gotham Book</option>
+          </optgroup>
+        </select>
+      </div>
       <div style="margin-top:4px">
         <button class="btn btn-sm btn-ghost" style="font-size:11px" onclick="clearZone('${zone}')">Clear Zone</button>
       </div>
@@ -375,7 +401,7 @@ function renderZoneInputs(zone) {
 }
 
 function updateBox(zone, field, val) {
-  if (field === "color") {
+  if (field === "color" || field === "font") {
     boxes[zone][field] = val;
   } else {
     boxes[zone][field] = parseInt(val) || 0;
@@ -384,7 +410,7 @@ function updateBox(zone, field, val) {
 }
 
 function clearZone(zone) {
-  boxes[zone] = { x:0, y:0, w:0, h:0, max_pt: boxes[zone].max_pt, color: boxes[zone].color };
+  boxes[zone] = { x:0, y:0, w:0, h:0, max_pt: boxes[zone].max_pt, color: boxes[zone].color, font: boxes[zone].font || "" };
   renderZoneInputs(zone);
   redraw();
 }

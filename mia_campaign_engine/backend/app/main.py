@@ -187,3 +187,8 @@ async def files_page(request: Request):
 @app.get("/templates", response_class=HTMLResponse)
 async def templates_page(request: Request):
     return templates.TemplateResponse("template_editor.html", {"request": request})
+
+
+@app.get("/reports", response_class=HTMLResponse)
+async def reports_page(request: Request):
+    return templates.TemplateResponse("reports.html", {"request": request})

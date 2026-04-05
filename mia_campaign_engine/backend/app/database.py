@@ -81,6 +81,13 @@ async def _migrate_add_columns():
         "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS generate_images          BOOLEAN DEFAULT TRUE",
         "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS generate_videos          BOOLEAN DEFAULT TRUE",
         "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS image_template_id        VARCHAR(36)",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS heygen_bg_image_url      TEXT",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS heygen_video_template_id VARCHAR(100)",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS video_orientation        VARCHAR(20) DEFAULT 'landscape'",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS heygen_voice_id          VARCHAR(100)",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS elevenlabs_voice_id      VARCHAR(100)",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS report_blob_key          VARCHAR(500)",
+        "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS report_url               TEXT",
         # jobs table
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS heygen_video_status   VARCHAR(20)",
         "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS heygen_video_blob_key VARCHAR(500)",

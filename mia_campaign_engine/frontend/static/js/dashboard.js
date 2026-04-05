@@ -100,10 +100,18 @@ function fmtBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + " MB";
 }
 
+function _parseUTC(iso) {
+  // DB stores UTC without 'Z' suffix — append it so browser parses as UTC, not local time
+  if (!iso) return null;
+  return new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+}
+
+const _IST_OPTS = { timeZone: "Asia/Kolkata" };
+
 function fmtDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const d = _parseUTC(iso);
+  if (!d) return "—";
+  return d.toLocaleString("en-IN", { ..._IST_OPTS, dateStyle: "medium", timeStyle: "short" });
 }
 
 function statusBadge(status) {
@@ -305,6 +313,8 @@ function closeNewCampaignModal() {
   if (sec) sec.style.display = "none";
   const chkAvatar = document.getElementById("chkAvatar");
   if (chkAvatar) chkAvatar.checked = false;
+  // Reset orientation to default (landscape)
+  setOrientation("landscape");
 }
 
 function toggleAvatarSection(chk) {
@@ -325,6 +335,33 @@ function updateFileName(input, labelId, dropId) {
     label.textContent = input.files[0].name;
     drop.classList.add("has-file");
   }
+}
+
+// Orientation selector
+function setOrientation(value) {
+  ["landscape", "portrait", "square"].forEach(v => {
+    const el = document.getElementById("or" + v.charAt(0).toUpperCase() + v.slice(1));
+    if (el) el.classList.toggle("active", v === value);
+  });
+  // Update hidden input value (single source of truth for form submission)
+  const input = document.getElementById("videoOrientationInput");
+  if (input) input.value = value;
+}
+
+// Mutual-exclusion helpers: bg image ↔ template ID
+function clearTemplateId() {
+  const t = document.getElementById("heygenTemplateIdInput");
+  if (t) t.value = "";
+}
+
+function clearBgFile() {
+  const f = document.getElementById("heygenBgFile");
+  if (!f) return;
+  f.value = "";
+  const label = document.getElementById("bgFileName");
+  const drop  = document.getElementById("bgFileDrop");
+  if (label) label.textContent = "";
+  if (drop)  drop.classList.remove("has-file");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -378,7 +415,7 @@ async function initFilesPage() {
         _campaignMap[c.id] = c;
         const opt    = document.createElement("option");
         opt.value    = c.id;
-        const dt     = c.created_at ? new Date(c.created_at).toLocaleDateString("en-IN", { day:"2-digit", month:"short" }) : "";
+        const dt     = c.created_at ? _parseUTC(c.created_at).toLocaleDateString("en-IN", { ..._IST_OPTS, day:"2-digit", month:"short" }) : "";
         const status = c.status === "completed" ? "✓" : c.status === "failed" ? "✗" : "…";
         opt.textContent = `${status} ${c.name} (${dt})`;
         sel.appendChild(opt);
@@ -443,7 +480,7 @@ async function loadFiles() {
 
       grid.innerHTML = order.map(cid => {
         const cInfo  = _campaignMap[cid];
-        const dt     = cInfo?.created_at ? new Date(cInfo.created_at).toLocaleString("en-IN", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }) : "";
+        const dt     = cInfo?.created_at ? _parseUTC(cInfo.created_at).toLocaleString("en-IN", { ..._IST_OPTS, day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }) : "";
         const label  = cInfo ? `${escHtml(cInfo.name)} <span class="text-muted text-xs">${dt} · ${cid.slice(0,8)}…</span>` : `<span class="text-muted">${cid.slice(0,8)}…</span>`;
         const status = cInfo?.status === "completed" ? "badge-success" : cInfo?.status === "failed" ? "badge-danger" : "badge-warning";
         const badge  = cInfo ? `<span class="badge ${status}">${cInfo.status}</span>` : "";

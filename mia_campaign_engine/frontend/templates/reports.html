@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Reports — Mia Campaign Engine{% endblock %}
+{% block nav_reports %}active{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Campaign Reports</h1>
+    <p class="page-subtitle">Download Excel reports with personalised video URLs for each person</p>
+  </div>
+</div>
+
+<!-- Info banner -->
+<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid #e8c97e44;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;align-items:flex-start;gap:14px">
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#e8c97e" stroke-width="2" style="flex-shrink:0;margin-top:2px">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+  <div style="font-size:13px;line-height:1.6;color:var(--mia-muted)">
+    <strong style="color:var(--mia-text)">What's in the Excel report?</strong><br>
+    One row per person with their <strong style="color:var(--mia-accent)">Name · Age · Persona · Phase · Status</strong>
+    and clickable download links for <strong style="color:var(--mia-accent)">Image, Video (≤5 MB), AI Avatar Video (≤5 MB)</strong>.
+    Videos are compressed to ≤5 MB for easy download and sharing.
+    Reports are auto-generated after each campaign completes. Links stay valid for 30 days.
+  </div>
+</div>
+
+<!-- Campaign list -->
+<div class="card" style="padding:0;overflow:hidden">
+  <div style="padding:16px 20px;border-bottom:1px solid var(--mia-border);display:flex;align-items:center;justify-content:space-between">
+    <span style="font-weight:600;font-size:14px">All Campaigns</span>
+    <button class="btn btn-ghost" onclick="loadReports()" style="font-size:12px">↻ Refresh</button>
+  </div>
+  <div id="reportsList">
+    <div style="padding:40px;text-align:center;color:var(--mia-muted);font-size:14px">Loading campaigns…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadReports() {
+  const list = document.getElementById("reportsList");
+  list.innerHTML = `<div style="padding:40px;text-align:center;color:var(--mia-muted)">Loading…</div>`;
+
+  const campaigns = await apiFetch("/api/jobs/campaign?limit=100") || [];
+  if (!campaigns.length) {
+    list.innerHTML = `<div style="padding:40px;text-align:center;color:var(--mia-muted)">No campaigns yet.</div>`;
+    return;
+  }
+
+  const rows = campaigns.map(c => {
+    const isDone  = c.status === "completed" || c.status === "failed";
+    const hasRpt  = !!c.report_url;
+    const created = c.created_at ? _parseUTC(c.created_at).toLocaleString("en-IN", {
+      timeZone:"Asia/Kolkata", day:"2-digit", month:"short", year:"numeric",
+      hour:"2-digit", minute:"2-digit"
+    }) : "—";
+
+    let reportCell;
+    if (hasRpt) {
+      reportCell = `<button class="btn btn-primary" style="font-size:12px;padding:6px 14px"
+                      onclick="downloadReport('${c.id}', this)">
+                      ⬇ Download Excel
+                    </button>`;
+    } else if (isDone) {
+      reportCell = `<button class="btn btn-ghost" style="font-size:12px;padding:6px 14px"
+                      onclick="generateReport('${c.id}', this)">
+                      ⚙ Generate Report
+                    </button>`;
+    } else {
+      reportCell = `<span style="font-size:12px;color:var(--mia-muted)">Campaign running…</span>`;
+    }
+
+    const statusColor = {
+      completed:"#4caf50", running:"#e8c97e", failed:"#f44336", pending:"#9e9e9e"
+    }[c.status] || "#9e9e9e";
+
+    return `
+      <tr>
+        <td style="padding:12px 20px">
+          <div style="font-weight:600;font-size:13px">${escHtml(c.name)}</div>
+          <div style="font-size:11px;color:var(--mia-muted);margin-top:2px">${c.id.slice(0,8)}…</div>
+        </td>
+        <td style="padding:12px 16px;font-size:12px;color:var(--mia-muted)">${created}</td>
+        <td style="padding:12px 16px;text-align:center">
+          <span style="font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;
+                       background:${statusColor}22;color:${statusColor};text-transform:uppercase">
+            ${c.status}
+          </span>
+        </td>
+        <td style="padding:12px 16px;text-align:right;font-size:12px;color:var(--mia-muted)">
+          ${c.completed_jobs || 0} / ${c.total_jobs || 0} people
+        </td>
+        <td style="padding:12px 20px;text-align:right">${reportCell}</td>
+      </tr>`;
+  }).join("");
+
+  list.innerHTML = `
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="background:var(--mia-surface2)">
+          <th style="padding:10px 20px;text-align:left;font-size:11px;color:var(--mia-muted);font-weight:600;text-transform:uppercase">Campaign</th>
+          <th style="padding:10px 16px;text-align:left;font-size:11px;color:var(--mia-muted);font-weight:600;text-transform:uppercase">Created (IST)</th>
+          <th style="padding:10px 16px;text-align:center;font-size:11px;color:var(--mia-muted);font-weight:600;text-transform:uppercase">Status</th>
+          <th style="padding:10px 16px;text-align:right;font-size:11px;color:var(--mia-muted);font-weight:600;text-transform:uppercase">Jobs</th>
+          <th style="padding:10px 20px;text-align:right;font-size:11px;color:var(--mia-muted);font-weight:600;text-transform:uppercase">Report</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function generateReport(campaignId, btn) {
+  btn.disabled = true;
+  btn.textContent = "⏳ Generating…";
+  btn.style.opacity = "0.7";
+
+  try {
+    const data = await apiFetch(`/api/jobs/campaign/${campaignId}/report`);
+    if (data?.report_url) {
+      btn.textContent = "⬇ Download Excel";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.onclick = () => downloadUrl(data.report_url, `report_${campaignId.slice(0,8)}.xlsx`);
+    } else if (data?.status === "pending") {
+      btn.textContent = "Campaign still running";
+      btn.disabled = true;
+    } else {
+      btn.textContent = "⚠ Failed — retry";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+    }
+  } catch (e) {
+    btn.textContent = "⚠ Error — retry";
+    btn.disabled = false;
+    btn.style.opacity = "1";
+  }
+}
+
+async function downloadReport(campaignId, btn) {
+  btn.disabled = true;
+  btn.textContent = "⏳ Refreshing…";
+  try {
+    const data = await apiFetch(`/api/jobs/campaign/${campaignId}/report`);
+    if (data?.report_url) {
+      downloadUrl(data.report_url, `mia_report_${campaignId.slice(0,8)}.xlsx`);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⬇ Download Excel";
+  }
+}
+
+function downloadUrl(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.target = "_blank";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// Load on page ready
+loadReports();
+</script>
+{% endblock %}

@@ -247,20 +247,14 @@ def _render_preview(img_bytes: bytes, boxes: dict, job: dict) -> bytes:
     draw = ImageDraw.Draw(img)
     lines = job.get("lines", {})
 
-    zone_fonts = {
-        "heading":    config.FONT_PLAYFAIR_BOLD,
-        "subheading": config.FONT_PLAYFAIR_REGULAR,
-        "body":       config.FONT_LATO_REGULAR,
-        "cta":        config.FONT_LATO_ITALIC,
-    }
-
-    for zone, font_path in zone_fonts.items():
+    for zone in ("heading", "subheading", "body", "cta"):
         if zone not in boxes:
             continue
         zb = boxes[zone]
         box = {"x": zb["x"], "y": zb["y"], "w": zb["w"], "h": zb["h"]}
         color = _hex_to_rgb(zb.get("color", "#ffffff"))
         max_pt = int(zb.get("max_pt", 32))
+        font_path = config.zone_font_path(zone, zb.get("font"))
         text = lines.get(zone, "")
         if text:
             _draw_text_in_box(draw, text, box, font_path=font_path, max_size=max_pt, fill=color)

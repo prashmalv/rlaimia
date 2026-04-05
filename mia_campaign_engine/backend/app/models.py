@@ -92,8 +92,20 @@ class Campaign(Base):
     image_template_id = Column(String(36), nullable=True)  # FK to image_templates.id
 
     # Heygen AI Avatar Video — optional per-campaign
-    heygen_talking_photo_id = Column(String(200), nullable=True)  # ID from Heygen after avatar upload
-    avatar_voice_gender     = Column(String(10),  nullable=True)  # "male" | "female" | None
+    heygen_talking_photo_id  = Column(String(200), nullable=True)  # ID from Heygen after avatar upload
+    avatar_voice_gender      = Column(String(10),  nullable=True)  # "male" | "female" | None
+    heygen_bg_image_url      = Column(Text,        nullable=True)  # SAS URL of background image uploaded by user
+    heygen_video_template_id = Column(String(100), nullable=True)  # Heygen template ID (overrides bg+avatar defaults)
+    # Video orientation: "landscape" (1280×720) | "portrait" (720×1280) | "square" (720×720)
+    video_orientation        = Column(String(20),  nullable=True, default="landscape")
+
+    # Per-campaign voice overrides (override env-var defaults)
+    heygen_voice_id          = Column(String(100), nullable=True)  # Heygen voice_id override for this campaign
+    elevenlabs_voice_id      = Column(String(100), nullable=True)  # ElevenLabs voice ID → TTS audio → Heygen audio mode
+
+    # Post-campaign report
+    report_blob_key          = Column(String(500), nullable=True)  # blob key of Excel report
+    report_url               = Column(Text,        nullable=True)  # SAS URL of Excel report (refreshed on access)
 
     jobs           = relationship("Job", back_populates="campaign", lazy="dynamic")
 
@@ -184,6 +196,13 @@ class CampaignOut(BaseModel):
     heygen_talking_photo_id: Optional[str] = None
     avatar_voice_gender: Optional[str] = None
     image_template_id: Optional[str] = None
+    heygen_bg_image_url: Optional[str] = None
+    heygen_video_template_id: Optional[str] = None
+    video_orientation: Optional[str] = "landscape"
+    heygen_voice_id: Optional[str] = None
+    elevenlabs_voice_id: Optional[str] = None
+    report_blob_key: Optional[str] = None
+    report_url: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -40,3 +40,9 @@ psutil==6.1.0
 
 # ─── Video (optional moviepy as fallback, ffmpeg via subprocess is primary) ───
 # moviepy==2.0.0         # Only if needed for complex compositing
+
+# ─── Background Removal (optional — needed for avatar bg extraction) ───────────
+# rembg uses onnxruntime to run a U2Net model for background removal
+# Falls back gracefully if not installed (upload_talking_photo still works)
+rembg==2.0.57
+onnxruntime==1.19.2

@@ -29,6 +29,12 @@ router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
 logger = logging.getLogger(__name__)
 
 
+def _generate_report_sync(campaign_id: str):
+    """Sync wrapper — called via asyncio.to_thread from _process_campaign_bg."""
+    from backend.workers.report_worker import generate_campaign_report
+    generate_campaign_report(campaign_id)
+
+
 # ─── Background campaign processor (runs in API container — has file access) ──
 
 # ─── Phase 1: Image generation (one job) ─────────────────────────────────────
@@ -135,7 +141,14 @@ async def _run_video_for_job(job: dict, campaign_id: str) -> bool:
 # ─── Phase 3: AI Avatar video generation (one job) ───────────────────────────
 
 async def _run_heygen_for_job(
-    job: dict, campaign_id: str, talking_photo_id: str, voice_id: Optional[str] = None
+    job: dict,
+    campaign_id: str,
+    talking_photo_id: str,
+    voice_id: Optional[str] = None,
+    bg_image_url: Optional[str] = None,
+    video_template_id: Optional[str] = None,
+    elevenlabs_voice_id: Optional[str] = None,
+    orientation: Optional[str] = None,
 ) -> bool:
     """Generate AI avatar video for one job. Updates DB. Returns True on success. Never raises."""
     from backend.workers.heygen_worker import process_heygen_job
@@ -149,7 +162,10 @@ async def _run_heygen_for_job(
 
     hey_ok, blob_key, url, err_msg = False, None, None, None
     try:
-        hey_res  = await asyncio.to_thread(process_heygen_job, job, campaign_id, talking_photo_id, voice_id)
+        hey_res  = await asyncio.to_thread(
+            process_heygen_job, job, campaign_id, talking_photo_id, voice_id,
+            bg_image_url, video_template_id, elevenlabs_voice_id, orientation,
+        )
         hey_ok   = isinstance(hey_res, dict) and hey_res.get("status") == "done"
         blob_key = hey_res.get("blob_key") if hey_ok else None
         url      = hey_res.get("url")      if hey_ok else None
@@ -160,12 +176,15 @@ async def _run_heygen_for_job(
         logger.error(f"Job {job_id} AI avatar phase error: {e}", exc_info=True)
 
     async with AsyncSessionLocal() as db:
-        await db.execute(update(Job).where(Job.id == job_id).values(
+        values = dict(
             heygen_video_status=JobStatus.DONE if hey_ok else JobStatus.FAILED,
             heygen_video_blob_key=blob_key,
             heygen_video_url=url,
             updated_at=datetime.utcnow(),
-        ))
+        )
+        if not hey_ok and err_msg:
+            values["error_msg"] = err_msg[:500]
+        await db.execute(update(Job).where(Job.id == job_id).values(**values))
         await db.commit()
 
     try:
@@ -235,6 +254,11 @@ async def _process_campaign_bg(
     generate_images: bool = True,
     generate_videos: bool = True,
     image_template_id: Optional[str] = None,
+    bg_image_url: Optional[str] = None,
+    video_template_id: Optional[str] = None,
+    heygen_voice_id: Optional[str] = None,
+    elevenlabs_voice_id: Optional[str] = None,
+    video_orientation: Optional[str] = None,
 ):
     """
     Reads person XLSX, builds job records, inserts into DB, then runs
@@ -265,14 +289,32 @@ async def _process_campaign_bg(
             )
 
             # Build job records and insert into DB
+            # If no phase override given, try DOB-based detection; if still 0 jobs, auto-fallback to ALL
+            effective_phase = phase_override or None
             all_jobs = []
-            for _, row in people_df.iterrows():
-                record = build_person_record(row.to_dict(), name_col, template_file, phase_override)
-                if not record:
-                    continue
+
+            def _build_jobs(phase_arg):
+                jobs = []
+                for _, row in people_df.iterrows():
+                    record = build_person_record(row.to_dict(), name_col, template_file, phase_arg)
+                    if record:
+                        jobs.append(record)
+                return jobs
+
+            all_jobs = _build_jobs(effective_phase)
+
+            # Auto-fallback: if DOB-based detection returned 0 rows, use ALL phase
+            if not all_jobs and not phase_override:
+                logger.warning(
+                    f"Campaign {campaign_id}: 0 jobs from DOB-detection — "
+                    "auto-falling back to ALL phase (no DOB matches today)"
+                )
+                all_jobs = _build_jobs("ALL")
+                effective_phase = "ALL"
+
+            for record in all_jobs:
                 job_id = str(uuid.uuid4())
                 record["job_id"] = job_id
-
                 db_job = Job(
                     id=job_id,
                     campaign_id=campaign_id,
@@ -288,7 +330,6 @@ async def _process_campaign_bg(
                     video_status=JobStatus.QUEUED  if generate_videos else JobStatus.SKIPPED,
                 )
                 db.add(db_job)
-                all_jobs.append(record)
 
             await db.execute(
                 update(Campaign)
@@ -297,7 +338,7 @@ async def _process_campaign_bg(
             )
             await db.commit()
 
-            logger.info(f"Campaign {campaign_id}: {len(all_jobs)} jobs created")
+            logger.info(f"Campaign {campaign_id}: {len(all_jobs)} jobs created (phase={effective_phase})")
 
             if not all_jobs:
                 await db.execute(
@@ -305,7 +346,7 @@ async def _process_campaign_bg(
                     .where(Campaign.id == campaign_id)
                     .values(
                         status=CampaignStatus.FAILED,
-                        error_msg="No matching jobs created — check persona values match template or verify phase selection",
+                        error_msg="No matching jobs created — check that persona column values match template personas",
                     )
                 )
                 await db.commit()
@@ -336,13 +377,19 @@ async def _process_campaign_bg(
                 import json as _json
                 boxes = tmpl.boxes_dict()
                 # Build config dict compatible with image_worker.generate_image(custom_config=...)
+                def _box_geom(zone, default):
+                    b = boxes.get(zone, {})
+                    geom = {k: b[k] for k in ("x","y","w","h") if k in b} or default
+                    if "font" in b:
+                        geom["font"] = b["font"]   # carry font key through to image_worker
+                    return geom
                 custom_template_config = {
                     "image_path": tmpl.local_path or "",
                     "blob_key":   tmpl.blob_key,
-                    "heading_box":    {k: boxes["heading"][k]    for k in ("x","y","w","h")} if "heading"    in boxes else {"x":50,"y":50,"w":500,"h":150},
-                    "subheading_box": {k: boxes["subheading"][k] for k in ("x","y","w","h")} if "subheading" in boxes else {"x":50,"y":220,"w":500,"h":80},
-                    "body_box":       {k: boxes["body"][k]       for k in ("x","y","w","h")} if "body"       in boxes else {"x":50,"y":320,"w":500,"h":120},
-                    "cta_box":        {k: boxes["cta"][k]        for k in ("x","y","w","h")} if "cta"        in boxes else {"x":50,"y":460,"w":500,"h":60},
+                    "heading_box":    _box_geom("heading",    {"x":50,"y":50,"w":500,"h":150}),
+                    "subheading_box": _box_geom("subheading", {"x":50,"y":220,"w":500,"h":80}),
+                    "body_box":       _box_geom("body",       {"x":50,"y":320,"w":500,"h":120}),
+                    "cta_box":        _box_geom("cta",        {"x":50,"y":460,"w":500,"h":60}),
                     "heading_max_pt":    int(boxes.get("heading",    {}).get("max_pt", 64)),
                     "subheading_max_pt": int(boxes.get("subheading", {}).get("max_pt", 32)),
                     "body_max_pt":       int(boxes.get("body",       {}).get("max_pt", 26)),
@@ -357,8 +404,8 @@ async def _process_campaign_bg(
         except Exception as e:
             logger.error(f"Campaign {campaign_id}: failed to load custom template: {e}")
 
-    # ── Guard: avatar-only campaign but talking_photo_id is None → fail early ──
-    if not generate_images and not generate_videos and not talking_photo_id:
+    # ── Guard: avatar-only campaign but no talking_photo_id AND no template → fail early ──
+    if not generate_images and not generate_videos and not talking_photo_id and not video_template_id:
         async with AsyncSessionLocal() as db:
             await db.execute(update(Campaign).where(Campaign.id == campaign_id).values(
                 status=CampaignStatus.FAILED,
@@ -367,17 +414,20 @@ async def _process_campaign_bg(
                 updated_at=datetime.utcnow(),
             ))
             await db.commit()
-        logger.error(f"Campaign {campaign_id}: avatar-only but talking_photo_id=None — marking FAILED")
+        logger.error(f"Campaign {campaign_id}: avatar-only but talking_photo_id=None and no template — marking FAILED")
         return
 
     # ── Resolve voice_id for Heygen (if avatar requested) ────────────────────
+    # Fix: parentheses required — Python parses `a or b if c else d` as `a or (b if c else d)`
     voice_id: Optional[str] = None
-    if talking_photo_id:
-        voice_id = (
-            config.HEYGEN_VOICE_ID_MALE or config.HEYGEN_VOICE_ID
-            if voice_gender == "male"
-            else config.HEYGEN_VOICE_ID_FEMALE or config.HEYGEN_VOICE_ID
-        )
+    if talking_photo_id or video_template_id:
+        if heygen_voice_id:
+            # Per-campaign override takes priority
+            voice_id = heygen_voice_id
+        elif voice_gender == "male":
+            voice_id = config.HEYGEN_VOICE_ID_MALE or config.HEYGEN_VOICE_ID
+        else:
+            voice_id = config.HEYGEN_VOICE_ID_FEMALE or config.HEYGEN_VOICE_ID
 
     # ── Phase 1: Images — all jobs in parallel ────────────────────────────────
     if generate_images:
@@ -402,12 +452,18 @@ async def _process_campaign_bg(
         logger.info(f"Campaign {campaign_id}: Phase 2 — videos SKIPPED (not selected)")
 
     # ── Phase 3: AI Avatar Videos — all jobs in parallel (if enabled) ─────────
-    if talking_photo_id:
-        logger.info(f"Campaign {campaign_id}: Phase 3 — AI avatar videos ({len(all_jobs)} jobs)")
+    if talking_photo_id or video_template_id:
+        logger.info(f"Campaign {campaign_id}: Phase 3 — AI avatar videos ({len(all_jobs)} jobs, "
+                    f"mode={'template' if video_template_id else ('bg_image' if bg_image_url else 'solid_bg')})")
         hey_sem = asyncio.Semaphore(2)
         async def _hey(job):
             async with hey_sem:
-                return await _run_heygen_for_job(job, campaign_id, talking_photo_id, voice_id)
+                return await _run_heygen_for_job(
+                    job, campaign_id, talking_photo_id or "", voice_id,
+                    bg_image_url=bg_image_url, video_template_id=video_template_id,
+                    elevenlabs_voice_id=elevenlabs_voice_id,
+                    orientation=video_orientation,
+                )
         await asyncio.gather(*[_hey(j) for j in all_jobs])
 
     # ── Finalize: compute overall status per job from phase results ───────────
@@ -456,6 +512,13 @@ async def _process_campaign_bg(
         except Exception as e:
             logger.error(f"Campaign {campaign_id} finalize failed: {e}")
 
+    # ── Generate Excel report (background — non-blocking) ──────────────────
+    try:
+        logger.info(f"Campaign {campaign_id}: generating Excel report...")
+        await asyncio.to_thread(_generate_report_sync, campaign_id)
+    except Exception as e:
+        logger.warning(f"Campaign {campaign_id}: report generation failed (non-fatal): {e}")
+
 
 # ─── Upload + Create Campaign ────────────────────────────────────────────────
 
@@ -471,9 +534,15 @@ async def create_campaign(
     generate_videos: Optional[str] = Form(None),    # "true" | "false"
     generate_avatar: Optional[str] = Form(None),    # "true" | "false"
     image_template_id: Optional[str] = Form(None),  # ID of selected image template
-    avatar_file: Optional[UploadFile] = File(None), # Heygen avatar image (jpg/png)
-    heygen_avatar_id: Optional[str] = Form(None),   # Pre-existing Heygen talking_photo_id
+    avatar_file: Optional[UploadFile] = File(None),  # Heygen avatar image (jpg/png)
+    heygen_avatar_id: Optional[str] = Form(None),    # Pre-existing Heygen talking_photo_id
     avatar_voice_gender: Optional[str] = Form(None), # "male" | "female"
+    heygen_bg_file: Optional[UploadFile] = File(None),        # background image for avatar video
+    heygen_video_template_id: Optional[str] = Form(None),     # Heygen Studio template ID
+    heygen_voice_id: Optional[str] = Form(None),              # Heygen voice ID override for this campaign
+    elevenlabs_voice_id: Optional[str] = Form(None),          # ElevenLabs voice ID for TTS audio
+    remove_avatar_bg: Optional[str] = Form(None),             # "true" → run rembg on avatar image
+    video_orientation: Optional[str] = Form(None),            # "landscape" | "portrait" | "square"
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -516,7 +585,10 @@ async def create_campaign(
         if config.HEYGEN_API_KEY:
             try:
                 from backend.workers.heygen_worker import upload_talking_photo
-                talking_photo_id = await asyncio.to_thread(upload_talking_photo, str(avatar_path))
+                do_rembg = (remove_avatar_bg == "true")
+                talking_photo_id = await asyncio.to_thread(
+                    upload_talking_photo, str(avatar_path), do_rembg
+                )
                 logger.info(f"Campaign {campaign_id}: Heygen avatar uploaded → {talking_photo_id}")
             except Exception as e:
                 upload_err = str(e)
@@ -534,6 +606,30 @@ async def create_campaign(
                            "Set it as an environment variable to enable AI Avatar generation.")
             logger.warning(f"Campaign {campaign_id}: avatar_file provided but HEYGEN_API_KEY not set — skipping Heygen")
 
+    # ── Heygen: upload background image to Azure Blob → get long-lived SAS URL ──
+    resolved_bg_image_url: Optional[str] = None
+    resolved_template_id: Optional[str] = (heygen_video_template_id or "").strip() or None
+
+    if gen_avatar and heygen_bg_file and heygen_bg_file.filename and not resolved_template_id:
+        bg_ext  = Path(heygen_bg_file.filename).suffix or ".jpg"
+        bg_data = await heygen_bg_file.read()
+        if bg_data:
+            try:
+                from backend.app.azure_storage import upload_bytes, get_sas_url
+                bg_blob_key = f"heygen-backgrounds/{campaign_id}{bg_ext}"
+                upload_bytes(
+                    bg_data, bg_blob_key,
+                    container=config.AZURE_BLOB_CONTAINER_IMG,
+                    content_type="image/jpeg" if bg_ext in (".jpg", ".jpeg") else "image/png",
+                )
+                # Use a 48-hour SAS URL so Heygen can fetch it during video rendering
+                resolved_bg_image_url = get_sas_url(
+                    bg_blob_key, container=config.AZURE_BLOB_CONTAINER_IMG, hours=48
+                )
+                logger.info(f"Campaign {campaign_id}: background image uploaded → {bg_blob_key}")
+            except Exception as e:
+                logger.warning(f"Campaign {campaign_id}: background image upload failed (non-fatal): {e}")
+
     # Create DB record
     campaign = Campaign(
         id=campaign_id,
@@ -547,6 +643,11 @@ async def create_campaign(
         heygen_talking_photo_id=talking_photo_id,
         avatar_voice_gender=avatar_voice_gender or None,
         image_template_id=image_template_id or None,
+        heygen_bg_image_url=resolved_bg_image_url,
+        heygen_video_template_id=resolved_template_id,
+        heygen_voice_id=(heygen_voice_id or "").strip() or None,
+        elevenlabs_voice_id=(elevenlabs_voice_id or "").strip() or None,
+        video_orientation=(video_orientation or "landscape").strip(),
     )
     db.add(campaign)
     await db.commit()
@@ -564,6 +665,11 @@ async def create_campaign(
         gen_images,
         gen_videos,
         image_template_id or None,
+        resolved_bg_image_url,
+        resolved_template_id,
+        (heygen_voice_id or "").strip() or None,
+        (elevenlabs_voice_id or "").strip() or None,
+        (video_orientation or "landscape").strip(),
     )
 
     return CampaignOut.model_validate(campaign)
@@ -592,34 +698,61 @@ async def get_campaign(campaign_id: str, db: AsyncSession = Depends(get_db)):
     if not campaign:
         raise HTTPException(404, "Campaign not found")
 
-    # Sync progress from Redis inline (avoid dispatching to unmonitored Celery queue)
-    try:
-        import redis as _redis_lib
-        r = _redis_lib.from_url(config.REDIS_URL, decode_responses=True)
-        progress = r.hgetall(f"campaign:{campaign_id}:progress")
-        if progress and campaign.total_jobs and campaign.total_jobs > 0:
-            images_done   = int(progress.get("images_done",   0))
-            videos_done   = int(progress.get("videos_done",   0))
-            images_failed = int(progress.get("images_failed", 0))
-            videos_failed = int(progress.get("videos_failed", 0))
-            completed = min(images_done, videos_done)
-            pct = round(completed / campaign.total_jobs * 100, 1)
-            status = CampaignStatus.COMPLETED if completed >= campaign.total_jobs else CampaignStatus.RUNNING
-            await db.execute(
-                update(Campaign)
-                .where(Campaign.id == campaign_id)
-                .values(
-                    completed_jobs=completed,
-                    failed_jobs=max(images_failed, videos_failed),
-                    progress_pct=pct,
-                    status=status,
-                    updated_at=datetime.utcnow(),
+    # Sync live progress from Redis — show progress as % of total work units done
+    if campaign.status == CampaignStatus.RUNNING and campaign.total_jobs and campaign.total_jobs > 0:
+        try:
+            import redis as _redis_lib
+            r = _redis_lib.from_url(config.REDIS_URL, decode_responses=True)
+            progress = r.hgetall(f"campaign:{campaign_id}:progress")
+            if progress:
+                images_done   = int(progress.get("images_done",    0))
+                videos_done   = int(progress.get("videos_done",    0))
+                heygen_done   = int(progress.get("heygen_done",    0))
+                images_failed = int(progress.get("images_failed",  0))
+                videos_failed = int(progress.get("videos_failed",  0))
+                heygen_failed = int(progress.get("heygen_failed",  0))
+
+                has_avatar = bool(
+                    campaign.heygen_talking_photo_id or campaign.heygen_video_template_id
                 )
-            )
-            await db.commit()
-            await db.refresh(campaign)
-    except Exception:
-        pass
+
+                # Build list of (done, failed) per active phase
+                phase_counts = []
+                if campaign.generate_images:
+                    phase_counts.append((images_done, images_failed))
+                if campaign.generate_videos:
+                    phase_counts.append((videos_done, videos_failed))
+                if has_avatar:
+                    phase_counts.append((heygen_done, heygen_failed))
+
+                if phase_counts:
+                    total_units = len(phase_counts) * campaign.total_jobs
+                    done_units  = sum(d for d, _ in phase_counts)
+                    fail_units  = sum(f for _, f in phase_counts)
+                    pct = round((done_units + fail_units) / total_units * 100, 1)
+                    # A job is "completed" only when its slowest phase finishes
+                    completed = min(d for d, _ in phase_counts) if phase_counts else 0
+                    failed    = min(f for _, f in phase_counts) if phase_counts else 0
+                    status = (
+                        CampaignStatus.COMPLETED
+                        if (done_units + fail_units) >= total_units
+                        else CampaignStatus.RUNNING
+                    )
+                    await db.execute(
+                        update(Campaign)
+                        .where(Campaign.id == campaign_id)
+                        .values(
+                            completed_jobs=completed,
+                            failed_jobs=failed,
+                            progress_pct=pct,
+                            status=status,
+                            updated_at=datetime.utcnow(),
+                        )
+                    )
+                    await db.commit()
+                    await db.refresh(campaign)
+        except Exception:
+            pass
 
     return CampaignOut.model_validate(campaign)
 
@@ -755,6 +888,63 @@ async def campaign_stats(campaign_id: str, db: AsyncSession = Depends(get_db)):
         "heygen_enabled": bool(campaign.heygen_talking_photo_id),
         "by_status":      status_counts,
     }
+
+
+# ─── Report: generate / get Excel report for a campaign ──────────────────────
+
+@router.get("/campaign/{campaign_id}/report")
+async def get_campaign_report(campaign_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Return the download URL for a campaign's Excel report.
+    If report doesn't exist yet (campaign not finished), triggers generation.
+    Refreshes SAS URL on every call so it never expires.
+    """
+    result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+
+    # If report blob exists, refresh SAS and return
+    if campaign.report_blob_key:
+        try:
+            from backend.app.azure_storage import get_sas_url
+            url = get_sas_url(
+                campaign.report_blob_key,
+                config.AZURE_BLOB_CONTAINER_VID,
+                hours=720,
+            )
+            await db.execute(
+                update(Campaign).where(Campaign.id == campaign_id)
+                .values(report_url=url, updated_at=datetime.utcnow())
+            )
+            await db.commit()
+            return {"campaign_id": campaign_id, "report_url": url, "status": "ready"}
+        except Exception as e:
+            logger.warning(f"Report SAS refresh failed: {e}")
+
+    # No report yet — generate now (blocks until done)
+    if campaign.status not in ("completed", "failed"):
+        return JSONResponse(
+            {"campaign_id": campaign_id, "status": "pending",
+             "message": "Campaign is still running — report will be available after completion."},
+            status_code=202,
+        )
+
+    try:
+        url = await asyncio.to_thread(_generate_report_sync_returning, campaign_id)
+        if url:
+            return {"campaign_id": campaign_id, "report_url": url, "status": "ready"}
+        raise HTTPException(500, "Report generation failed — check server logs")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Report generation error: {e}")
+
+
+def _generate_report_sync_returning(campaign_id: str) -> Optional[str]:
+    """Sync wrapper that returns the report URL."""
+    from backend.workers.report_worker import generate_campaign_report
+    return generate_campaign_report(campaign_id)
 
 
 # ─── Debug: test image generation inline ─────────────────────────────────────
