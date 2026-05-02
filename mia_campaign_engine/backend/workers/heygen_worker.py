@@ -494,8 +494,15 @@ def _overlay_name_on_video(
 ) -> bytes:
     """
     Burn first_name text onto Scene 1 (first N seconds) of the Heygen video.
-    Style: large italic golden text, centered vertically, with bright glow border
-    that gives a lightbulb-shine effect.
+
+    Matches the Heygen Studio text-element settings exactly:
+      Font  : Lato Regular, size 195
+      Color : #FFF090 (100% opacity)
+      Align : center (horizontal)
+      Position on 1080×1920 canvas: x_center=540, y=1013, w=939, h=250
+
+    FFmpeg drawtext uses the video's actual pixel dimensions, which should match
+    the Heygen canvas (1080×1920 for portrait HD templates).
     Returns modified video bytes.
     """
     import subprocess
@@ -504,27 +511,23 @@ def _overlay_name_on_video(
 
     name_escaped = first_name.replace("'", "").replace(":", "").replace("\\", "")
 
-    # Use italic font (Lato Italic for clean italic rendering)
-    font_italic = config.FONT_LATO_ITALIC or config.FONT_PLAYFAIR_BOLD
+    # Lato Regular matches the Heygen text element font
+    font_regular = config.FONT_LATO_REGULAR or config.FONT_PLAYFAIR_BOLD or config.FONT_LATO_ITALIC
 
-    # Golden glow effect: 3 layered drawtext calls
-    # Layer 1: outer glow — large border, warm yellow
-    # Layer 2: mid glow  — smaller border, bright gold
-    # Layer 3: main text — solid #FFD700 gold, italic
-    def dt(extra=""):
-        return (
-            f"drawtext=fontfile='{font_italic}'"
-            f":text='{name_escaped}'"
-            f":x=(w-text_w)/2:y=(h-text_h)/2"
-            f":enable='between(t,0,{scene1_duration})'"
-            f"{extra}"
-        )
-
-    glow_outer = dt(f":fontsize=92:fontcolor=#FFD700@0.0:borderw=18:bordercolor=#FFFACD@0.25")
-    glow_mid   = dt(f":fontsize=92:fontcolor=#FFD700@0.0:borderw=8:bordercolor=#FFE066@0.55")
-    main_text  = dt(f":fontsize=88:fontcolor=#FFD700:borderw=3:bordercolor=#FFFFFF@0.45")
-
-    vf = f"{glow_outer},{glow_mid},{main_text}"
+    # Heygen canvas: 1080×1920. x_center=540=1080/2 → horizontally centered.
+    # y=1013 is the top of the text box on that 1920-tall canvas.
+    # fontsize=195 to match the Heygen element size.
+    # Use ih/iw-relative expressions so it still works if Heygen outputs a
+    # different resolution (scales proportionally).
+    vf = (
+        f"drawtext=fontfile='{font_regular}'"
+        f":text='{name_escaped}'"
+        f":x=(w-text_w)/2"
+        f":y=h*1013/1920"
+        f":fontsize=h*195/1920"
+        f":fontcolor=#FFF090"
+        f":enable='between(t,0,{scene1_duration})'"
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fin:
         fin.write(video_bytes)
