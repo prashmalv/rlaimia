@@ -327,17 +327,36 @@ def create_heygen_video_from_template(
         or {}
     )
     if not raw_vars:
-        # Template has no registered API variables — generate as-is (baked-in avatar script).
-        # Scene 1 name display is handled by FFmpeg golden overlay; no Heygen variable needed.
-        logger.info(f"[heygen] template {template_id}: no API variables — generating as-is, name overlay via FFmpeg")
+        # Template API returned no variables.  The voice script likely contains {script}
+        # as a plain-text placeholder for the person's name (e.g. "Hi, {script}. Happy birthday...").
+        # Inject {script}=first_name as a "text" variable and let Heygen substitute it.
+        # Falls back to as-is generation if Heygen rejects the unknown variable.
         w, h = _orientation_dims(orientation)
-        payload: dict = {"caption": False, "variables": {}, "dimension": {"width": w, "height": h}}
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
-                headers={"X-Api-Key": api_key},
-                json=payload,
-            )
+
+        def _gen_template(variables: dict) -> dict:
+            payload: dict = {"caption": False, "variables": variables, "dimension": {"width": w, "height": h}}
+            with httpx.Client(timeout=30) as _c:
+                r = _c.post(
+                    f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
+                    headers={"X-Api-Key": api_key},
+                    json=payload,
+                )
+            return r
+
+        if first_name:
+            inject_vars: dict = {
+                "script": {"name": "script", "type": "text", "properties": {"content": first_name}},
+            }
+            logger.info(f"[heygen] template {template_id}: injecting script={first_name!r} (text) into voice placeholder")
+            resp = _gen_template(inject_vars)
+            if resp.is_error:
+                logger.warning(
+                    f"[heygen] template {template_id}: name inject failed ({resp.text[:200]}) — generating as-is"
+                )
+                resp = _gen_template({})
+        else:
+            resp = _gen_template({})
+
         if resp.is_error:
             raise RuntimeError(f"Heygen template/generate failed [{resp.status_code}]: {resp.text[:500]}")
         data = resp.json()
