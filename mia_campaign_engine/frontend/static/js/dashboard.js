@@ -307,14 +307,11 @@ function closeNewCampaignModal() {
   document.getElementById("newCampaignForm").reset();
   document.getElementById("personFileName").textContent   = "";
   document.getElementById("templateFileName").textContent = "";
-  document.getElementById("avatarFileName").textContent   = "";
   // Reset avatar section visibility (checkbox unchecked by default)
   const sec = document.getElementById("avatarSection");
   if (sec) sec.style.display = "none";
   const chkAvatar = document.getElementById("chkAvatar");
   if (chkAvatar) chkAvatar.checked = false;
-  // Reset orientation to default (landscape)
-  setOrientation("landscape");
 }
 
 function toggleAvatarSection(chk) {
@@ -337,32 +334,6 @@ function updateFileName(input, labelId, dropId) {
   }
 }
 
-// Orientation selector
-function setOrientation(value) {
-  ["landscape", "portrait", "square"].forEach(v => {
-    const el = document.getElementById("or" + v.charAt(0).toUpperCase() + v.slice(1));
-    if (el) el.classList.toggle("active", v === value);
-  });
-  // Update hidden input value (single source of truth for form submission)
-  const input = document.getElementById("videoOrientationInput");
-  if (input) input.value = value;
-}
-
-// Mutual-exclusion helpers: bg image ↔ template ID
-function clearTemplateId() {
-  const t = document.getElementById("heygenTemplateIdInput");
-  if (t) t.value = "";
-}
-
-function clearBgFile() {
-  const f = document.getElementById("heygenBgFile");
-  if (!f) return;
-  f.value = "";
-  const label = document.getElementById("bgFileName");
-  const drop  = document.getElementById("bgFileDrop");
-  if (label) label.textContent = "";
-  if (drop)  drop.classList.remove("has-file");
-}
 
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("newCampaignForm");

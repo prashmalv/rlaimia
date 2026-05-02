@@ -320,18 +320,33 @@ def create_heygen_video_from_template(
 
     tmpl_data = tmpl_resp.json()
 
-    # Check if template has no variables defined — raise early so caller can fall back
+    # Get template variables (may be empty if template has everything baked in)
     raw_vars = (
         tmpl_data.get("data", {}).get("variables")
         or tmpl_data.get("variables")
         or {}
     )
     if not raw_vars:
-        raise RuntimeError(
-            f"Template {template_id} has empty scripts — no variables are defined in Heygen Studio. "
-            "Open the template in Heygen Studio, click a scene's voice, and add a text variable "
-            "(e.g. 'script') so the API can inject personalized text."
-        )
+        # Template has no registered API variables — generate as-is (baked-in avatar script).
+        # Scene 1 name display is handled by FFmpeg golden overlay; no Heygen variable needed.
+        logger.info(f"[heygen] template {template_id}: no API variables — generating as-is, name overlay via FFmpeg")
+        w, h = _orientation_dims(orientation)
+        payload: dict = {"caption": False, "variables": {}, "dimension": {"width": w, "height": h}}
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
+                headers={"X-Api-Key": api_key},
+                json=payload,
+            )
+        if resp.is_error:
+            raise RuntimeError(f"Heygen template/generate failed [{resp.status_code}]: {resp.text[:500]}")
+        data = resp.json()
+        logger.info(f"[heygen] template/generate response: {data}")
+        video_id = data.get("data", {}).get("video_id") or data.get("video_id")
+        if not video_id:
+            raise RuntimeError(f"Heygen template: no video_id in response: {data}")
+        logger.info(f"[heygen] Template video job created -> video_id={video_id}")
+        return video_id
 
     # Step 2: build V3 variables payload — handle ALL template variables
     # Name patterns for known slots
@@ -557,10 +572,15 @@ def process_heygen_job(
 
     # Build personalized script — prefer message_text (LLM-generated), then fallback
     if video_template_id:
-        # Template mode: personalized birthday greeting for avatar to speak
+        # Template mode: personalized Mia birthday script
         script = (
             job.get("message_text")
-            or f"Happy Birthday, {first_name}! Wishing you a truly wonderful day ahead."
+            or (
+                f"Hi, {first_name}. [excited] A very happy birthday from all of us at Mia by Tanishq. "
+                f"We hope your day is filled with moments that make your heart happy and a year ahead "
+                f"that brings you confidence, joy, and beautiful surprises. [warmly] Gentle reminder "
+                f"that you are precious every day. Once again, a very happy birthday from all of us."
+            )
         )
     else:
         script = (

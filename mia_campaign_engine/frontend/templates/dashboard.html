@@ -164,128 +164,27 @@
           <svg viewBox="0 0 24 24" width="16" height="16" style="color:var(--mia-accent);fill:none;stroke:currentColor;stroke-width:2">
             <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
           </svg>
-          <span style="font-size:13px;font-weight:600;color:var(--mia-text)">AI Avatar Video — optional</span>
-          <span style="font-size:11px;color:var(--mia-muted);margin-left:4px">Generates personalized AI talking-head videos</span>
+          <span style="font-size:13px;font-weight:600;color:var(--mia-text)">AI Avatar Video</span>
+          <span style="font-size:11px;color:var(--mia-muted);margin-left:4px">Generates personalized AI talking-head videos via Heygen template</span>
         </div>
 
-        <!-- ── Avatar source: photo upload OR existing Heygen avatar ID ── -->
+        <!-- ── Voice Gender ── -->
         <div class="form-group">
-          <label>Avatar Photo <span style="font-size:11px;color:var(--mia-muted)">(JPG/PNG — upload new face photo)</span></label>
-          <div class="file-drop" id="avatarFileDrop" onclick="document.getElementById('avatarFile').click()">
-            <svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-            <p>Upload a face photo for the AI avatar</p>
-            <span id="avatarFileName" class="file-name"></span>
-          </div>
-          <input type="file" id="avatarFile" name="avatar_file" accept=".jpg,.jpeg,.png,.webp" hidden
-                 onchange="updateFileName(this, 'avatarFileName', 'avatarFileDrop'); document.getElementById('heygenAvatarIdInput').value=''" />
-          <!-- rembg toggle — shown after file selected -->
-          <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;cursor:pointer">
-            <input type="checkbox" id="chkRemoveBg" name="remove_avatar_bg" value="true" style="width:13px;height:13px">
-            <span style="color:var(--mia-muted)">Auto-remove photo background (person only, placed on selected bg)</span>
-          </label>
+          <label>Voice Gender</label>
+          <select name="avatar_voice_gender" class="form-input">
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+          </select>
         </div>
 
-        <div class="form-group" style="margin-top:-4px">
-          <label style="font-size:12px;color:var(--mia-text);font-weight:600">— OR — Existing Heygen Avatar ID</label>
-          <input type="text" id="heygenAvatarIdInput" name="heygen_avatar_id"
-                 placeholder="Paste Heygen talking_photo_id here"
-                 class="form-input" style="font-size:12px;font-family:monospace"
-                 oninput="if(this.value.trim()){ document.getElementById('avatarFile').value=''; document.getElementById('avatarFileName').textContent=''; document.getElementById('avatarFileDrop').classList.remove('has-file'); }" />
-          <div style="font-size:11px;color:var(--mia-muted);margin-top:3px">
-            If you already uploaded a photo to Heygen previously, paste its ID here to reuse it.
-          </div>
-        </div>
-
-        <!-- ── Voice settings ── -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-group">
-            <label>Voice Gender</label>
-            <select name="avatar_voice_gender" class="form-input">
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Heygen Voice ID <span style="font-size:10px;color:var(--mia-muted)">(optional override)</span></label>
-            <input type="text" name="heygen_voice_id" placeholder="Leave blank for default"
-                   class="form-input" style="font-size:12px;font-family:monospace" />
-          </div>
-        </div>
-
-        <div class="form-group" style="margin-top:-4px">
-          <label>ElevenLabs Voice ID <span style="font-size:11px;color:var(--mia-muted)">(optional — uses ElevenLabs TTS instead of Heygen voice)</span></label>
-          <input type="text" name="elevenlabs_voice_id"
-                 placeholder="e.g. 21m00Tcm4TlvDq8ikWAM  (leave blank to use Heygen TTS)"
+        <!-- ── Heygen Template ID ── -->
+        <div class="form-group">
+          <label>Heygen Template ID <span style="font-size:11px;color:var(--mia-muted)">(avatar + background + style baked in)</span></label>
+          <input type="text" id="heygenTemplateIdInput" name="heygen_video_template_id"
+                 placeholder="e.g. afd6c773f84447da972adec2abd96577"
                  class="form-input" style="font-size:12px;font-family:monospace" />
-          <div style="font-size:11px;color:var(--mia-muted);margin-top:3px">
-            ElevenLabs generates speech audio first, then Heygen lip-syncs the avatar to it.
-            Requires ELEVENLABS_API_KEY set on the server.
-          </div>
-        </div>
-
-        <!-- ── Video orientation ── -->
-        <div class="form-group">
-          <label>Avatar Video Orientation</label>
-          <input type="hidden" id="videoOrientationInput" name="video_orientation" value="landscape">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px">
-            <div id="orLandscape" class="orientation-btn active" onclick="setOrientation('landscape')">
-              <svg viewBox="0 0 40 24" width="36" height="22" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="1" width="38" height="22" rx="2"/>
-                <circle cx="20" cy="12" r="5"/>
-              </svg>
-              <span>Landscape</span>
-              <span style="font-size:10px;color:var(--mia-muted)">1280×720</span>
-            </div>
-            <div id="orPortrait" class="orientation-btn" onclick="setOrientation('portrait')">
-              <svg viewBox="0 0 24 40" width="22" height="36" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="1" width="22" height="38" rx="2"/>
-                <circle cx="12" cy="20" r="5"/>
-              </svg>
-              <span>Portrait</span>
-              <span style="font-size:10px;color:var(--mia-muted)">720×1280</span>
-            </div>
-            <div id="orSquare" class="orientation-btn" onclick="setOrientation('square')">
-              <svg viewBox="0 0 30 30" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="1" width="28" height="28" rx="2"/>
-                <circle cx="15" cy="15" r="5"/>
-              </svg>
-              <span>Square</span>
-              <span style="font-size:10px;color:var(--mia-muted)">720×720</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Background options: image upload OR Heygen template ID -->
-        <div style="border-top:1px dashed var(--mia-border);padding-top:12px;margin-top:4px">
-          <div style="font-size:11px;font-weight:600;color:var(--mia-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
-            Background (pick one)
-          </div>
-
-          <!-- Option A: Custom background image -->
-          <div class="form-group" id="bgImageGroup">
-            <label>Background Image <span style="font-size:11px;color:var(--mia-muted)">(JPG / PNG — appears behind avatar)</span></label>
-            <div class="file-drop" id="bgFileDrop" onclick="document.getElementById('heygenBgFile').click()">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21,15 16,10 5,21"/>
-              </svg>
-              <p style="margin:4px 0 0">Upload background image</p>
-              <span id="bgFileName" class="file-name"></span>
-            </div>
-            <input type="file" id="heygenBgFile" name="heygen_bg_file" accept=".jpg,.jpeg,.png,.webp" hidden
-                   onchange="updateFileName(this, 'bgFileName', 'bgFileDrop'); clearTemplateId()" />
-          </div>
-
-          <!-- Option B: Heygen Studio template ID -->
-          <div class="form-group" style="margin-top:-4px">
-            <label style="font-size:11px;color:var(--mia-muted)">— OR — Heygen Template ID (background + style baked in)</label>
-            <input type="text" id="heygenTemplateIdInput" name="heygen_video_template_id"
-                   placeholder="e.g. f48e6fa739d04b5a8ee9f4e4f09ad6e0"
-                   class="form-input" style="font-size:12px;font-family:monospace"
-                   oninput="if(this.value.trim()) clearBgFile()" />
-            <div style="font-size:11px;color:var(--mia-muted);margin-top:4px">
-              Template overrides background image. Avatar &amp; voice defined inside the template.
-            </div>
+          <div style="font-size:11px;color:var(--mia-muted);margin-top:4px">
+            Create your template in Heygen Studio, then paste its ID here.
           </div>
         </div>
       </div>
