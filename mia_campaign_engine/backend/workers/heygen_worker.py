@@ -331,10 +331,9 @@ def create_heygen_video_from_template(
         # as a plain-text placeholder for the person's name (e.g. "Hi, {script}. Happy birthday...").
         # Inject {script}=first_name as a "text" variable and let Heygen substitute it.
         # Falls back to as-is generation if Heygen rejects the unknown variable.
-        w, h = _orientation_dims(orientation)
-
         def _gen_template(variables: dict) -> dict:
-            payload: dict = {"caption": False, "variables": variables, "dimension": {"width": w, "height": h}}
+            # No dimension override — template defines its own canvas size
+            payload: dict = {"caption": False, "variables": variables}
             with httpx.Client(timeout=30) as _c:
                 r = _c.post(
                     f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
@@ -413,8 +412,8 @@ def create_heygen_video_from_template(
         else:
             logger.warning(f"[heygen] template var '{var_name}' (type={var_type}) — no mapping, skipping")
 
-    w, h = _orientation_dims(orientation)
-    payload: dict = {"caption": False, "variables": variables, "dimension": {"width": w, "height": h}}
+    # No dimension override — template defines its own canvas size
+    payload: dict = {"caption": False, "variables": variables}
 
     # Step 3: generate
     with httpx.Client(timeout=30) as client:
