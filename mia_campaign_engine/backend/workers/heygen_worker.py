@@ -255,6 +255,62 @@ def create_heygen_video(
     return video_id
 
 
+# ─── Instant avatar video (bypasses template, uses avatar_id directly) ───────
+
+def create_heygen_avatar_video(
+    script: str,
+    avatar_id: str,
+    voice_id: Optional[str] = None,
+    audio_url: Optional[str] = None,
+    orientation: Optional[str] = None,
+) -> str:
+    """
+    Generate a Heygen video using a circle/system avatar (type: "avatar").
+    Used when a template has no API variables so the script cannot be injected;
+    this API call uses the same avatar_id and fully personalizes the voice.
+    Returns video_id for polling.
+    """
+    api_key = config.HEYGEN_API_KEY
+    if not api_key:
+        raise RuntimeError("HEYGEN_API_KEY not configured")
+
+    w, h = _orientation_dims(orientation)
+    payload = {
+        "video_inputs": [
+            {
+                "character": {
+                    "type": "avatar",
+                    "avatar_id": avatar_id,
+                    "avatar_style": "normal",
+                },
+                "voice": _build_voice_payload(script, voice_id, audio_url),
+            }
+        ],
+        "dimension": {"width": w, "height": h},
+    }
+
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(
+            f"{HEYGEN_API_BASE}/v2/video/generate",
+            headers={"X-Api-Key": api_key},
+            json=payload,
+        )
+
+    if resp.is_error:
+        raise RuntimeError(
+            f"Heygen avatar video/generate failed [{resp.status_code}]: {resp.text[:500]}"
+        )
+
+    data = resp.json()
+    logger.info(f"[heygen] avatar video/generate response: {data}")
+    video_id = data.get("data", {}).get("video_id") or data.get("video_id")
+    if not video_id:
+        raise RuntimeError(f"Heygen: no video_id in response: {data}")
+
+    logger.info(f"[heygen] Created avatar video job → video_id={video_id}")
+    return video_id
+
+
 # ─── Template-based video generation ─────────────────────────────────────────
 
 def _detect_text_variable(template_data: dict) -> Optional[str]:
@@ -327,35 +383,31 @@ def create_heygen_video_from_template(
         or {}
     )
     if not raw_vars:
-        # Template API returned no variables.  The voice script likely contains {script}
-        # as a plain-text placeholder for the person's name (e.g. "Hi, {script}. Happy birthday...").
-        # Inject {script}=first_name as a "text" variable and let Heygen substitute it.
-        # Falls back to as-is generation if Heygen rejects the unknown variable.
-        def _gen_template(variables: dict) -> dict:
-            # No dimension override — template defines its own canvas size
-            payload: dict = {"caption": False, "variables": variables}
-            with httpx.Client(timeout=30) as _c:
-                r = _c.post(
-                    f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
-                    headers={"X-Api-Key": api_key},
-                    json=payload,
-                )
-            return r
+        # Template has no registered API variables — Heygen rejects any variable injection.
+        # If HEYGEN_AVATAR_ID is configured, bypass the template voice by calling the
+        # instant-avatar API directly with the personalized script.
+        # This uses the same avatar face but lets us inject any text for the voice.
+        avatar_id = config.HEYGEN_AVATAR_ID
+        if avatar_id:
+            logger.info(
+                f"[heygen] template {template_id}: no API vars — using avatar API "
+                f"(avatar_id={avatar_id[:12]}...) for personalized voice"
+            )
+            return create_heygen_avatar_video(
+                script, avatar_id, voice_id=voice_id,
+                audio_url=audio_url, orientation=orientation,
+            )
 
-        if first_name:
-            inject_vars: dict = {
-                "script": {"name": "script", "type": "text", "properties": {"content": first_name}},
-            }
-            logger.info(f"[heygen] template {template_id}: injecting script={first_name!r} (text) into voice placeholder")
-            resp = _gen_template(inject_vars)
-            if resp.is_error:
-                logger.warning(
-                    f"[heygen] template {template_id}: name inject failed ({resp.text[:200]}) — generating as-is"
-                )
-                resp = _gen_template({})
-        else:
-            resp = _gen_template({})
-
+        # No avatar_id configured — generate template as-is (avatar speaks baked-in script).
+        # Name is still shown in Scene 1 via FFmpeg overlay.
+        logger.info(f"[heygen] template {template_id}: no API vars, no HEYGEN_AVATAR_ID — generating as-is")
+        payload: dict = {"caption": False, "variables": {}}
+        with httpx.Client(timeout=30) as _c:
+            resp = _c.post(
+                f"{HEYGEN_API_BASE}/v2/template/{template_id}/generate",
+                headers={"X-Api-Key": api_key},
+                json=payload,
+            )
         if resp.is_error:
             raise RuntimeError(f"Heygen template/generate failed [{resp.status_code}]: {resp.text[:500]}")
         data = resp.json()
@@ -512,21 +564,24 @@ def _overlay_name_on_video(
 
     # Lato Regular matches the Heygen text element font
     font_regular = config.FONT_LATO_REGULAR or config.FONT_PLAYFAIR_BOLD or config.FONT_LATO_ITALIC
+    if not font_regular or not os.path.exists(font_regular):
+        raise RuntimeError(f"[heygen] name overlay: font not found at {font_regular!r}")
 
-    # Heygen canvas: 1080×1920. x_center=540=1080/2 → horizontally centered.
-    # y=1013 is the top of the text box on that 1920-tall canvas.
-    # fontsize=195 to match the Heygen element size.
-    # Use ih/iw-relative expressions so it still works if Heygen outputs a
-    # different resolution (scales proportionally).
+    # Heygen canvas is 1080×1920 for this portrait template.
+    # Coordinates from Heygen Studio: fontsize=195, y=1013, center-aligned, color=#FFF090.
+    # fontsize must be a plain integer — FFmpeg drawtext does not eval expressions in fontsize
+    # on all versions. y uses (h/1920)*1013 so it scales if Heygen outputs at a different res.
+    font_size = 195
     vf = (
         f"drawtext=fontfile='{font_regular}'"
         f":text='{name_escaped}'"
         f":x=(w-text_w)/2"
-        f":y=h*1013/1920"
-        f":fontsize=h*195/1920"
+        f":y=(h/1920)*1013"
+        f":fontsize={font_size}"
         f":fontcolor=#FFF090"
         f":enable='between(t,0,{scene1_duration})'"
     )
+    logger.info(f"[heygen] overlay: font={font_regular!r} size={font_size} name={name_escaped!r}")
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as fin:
         fin.write(video_bytes)
@@ -680,7 +735,8 @@ def process_heygen_job(
             try:
                 video_bytes = _overlay_name_on_video(video_bytes, first_name, job_id)
             except Exception as ov_err:
-                logger.warning(f"[heygen] Job {job_id}: text overlay failed ({ov_err}), using original video")
+                logger.error(f"[heygen] Job {job_id}: text overlay FAILED — {ov_err}", exc_info=True)
+                # Continue with original video; name won't show but video is still usable
 
         # Upload to Azure Blob (video container)
         blob_key = f"{campaign_id}/{job_id}_heygen.mp4"

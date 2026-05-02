@@ -180,6 +180,9 @@ HEYGEN_API_KEY     = os.getenv("HEYGEN_API_KEY", "")
 HEYGEN_VOICE_ID        = os.getenv("HEYGEN_VOICE_ID",        "2d5b0e6cf36f460aa7fc47e3eee4ba54")
 HEYGEN_VOICE_ID_FEMALE = os.getenv("HEYGEN_VOICE_ID_FEMALE", "2d5b0e6cf36f460aa7fc47e3eee4ba54")
 HEYGEN_VOICE_ID_MALE   = os.getenv("HEYGEN_VOICE_ID_MALE",   "")   # Set via env; falls back to HEYGEN_VOICE_ID
+# Avatar ID used for instant-video fallback when template has no API variables.
+# Set to the Heygen circle-avatar ID used in the template so the same face is used.
+HEYGEN_AVATAR_ID       = os.getenv("HEYGEN_AVATAR_ID", "")
 HEYGEN_VIDEO_W     = int(os.getenv("HEYGEN_VIDEO_W", "1280"))
 HEYGEN_VIDEO_H     = int(os.getenv("HEYGEN_VIDEO_H", "720"))
 
