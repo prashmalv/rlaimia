@@ -263,18 +263,20 @@ def create_heygen_avatar_video(
     voice_id: Optional[str] = None,
     audio_url: Optional[str] = None,
     orientation: Optional[str] = None,
+    tmpl_w: int = 0,
+    tmpl_h: int = 0,
 ) -> str:
     """
     Generate a Heygen video using a circle/system avatar (type: "avatar").
-    Used when a template has no API variables so the script cannot be injected;
-    this API call uses the same avatar_id and fully personalizes the voice.
+    tmpl_w/tmpl_h: exact dimensions from template GET response (overrides orientation).
+    Falls back to portrait if neither is provided.
     Returns video_id for polling.
     """
     api_key = config.HEYGEN_API_KEY
     if not api_key:
         raise RuntimeError("HEYGEN_API_KEY not configured")
 
-    w, h = _orientation_dims(orientation)
+    w, h = (tmpl_w, tmpl_h) if (tmpl_w and tmpl_h) else _orientation_dims(orientation or "portrait")
     payload = {
         "video_inputs": [
             {
@@ -375,27 +377,54 @@ def create_heygen_video_from_template(
         )
 
     tmpl_data = tmpl_resp.json()
+    tmpl_inner = tmpl_data.get("data") or tmpl_data
+
+    # Log full template structure once — helps extract voice_id and dimensions
+    logger.info(f"[heygen] template data keys: {list(tmpl_inner.keys())}")
+    logger.info(f"[heygen] template data (truncated): {str(tmpl_inner)[:2000]}")
+
+    # Extract template dimensions so the avatar API video matches the template aspect ratio
+    tmpl_dim = tmpl_inner.get("dimension") or {}
+    tmpl_w   = int(tmpl_dim.get("width")  or tmpl_inner.get("width")  or 0)
+    tmpl_h   = int(tmpl_dim.get("height") or tmpl_inner.get("height") or 0)
+
+    # Extract voice_id from the first scene's character/voice settings
+    tmpl_voice_id: Optional[str] = None
+    for scene in (tmpl_inner.get("scenes") or tmpl_inner.get("video_inputs") or []):
+        char  = scene.get("character") or {}
+        voice = scene.get("voice") or char.get("voice") or {}
+        vid   = voice.get("voice_id") or voice.get("voiceId") or ""
+        if vid:
+            tmpl_voice_id = vid
+            logger.info(f"[heygen] extracted template voice_id={tmpl_voice_id!r}")
+            break
 
     # Get template variables (may be empty if template has everything baked in)
     raw_vars = (
-        tmpl_data.get("data", {}).get("variables")
-        or tmpl_data.get("variables")
+        tmpl_inner.get("variables")
         or {}
     )
     if not raw_vars:
         # Template has no registered API variables — Heygen rejects any variable injection.
         # If HEYGEN_AVATAR_ID is configured, bypass the template voice by calling the
         # instant-avatar API directly with the personalized script.
-        # This uses the same avatar face but lets us inject any text for the voice.
+        # Use the template's own dimensions and voice_id so the output matches.
         avatar_id = config.HEYGEN_AVATAR_ID
         if avatar_id:
+            # Effective voice: template's voice > caller's voice > config default
+            eff_voice = tmpl_voice_id or voice_id or config.HEYGEN_VOICE_ID
+            # Effective dimensions: template's > caller orientation > portrait default
+            if tmpl_w and tmpl_h:
+                eff_w, eff_h = tmpl_w, tmpl_h
+            else:
+                eff_w, eff_h = _orientation_dims(orientation or "portrait")
             logger.info(
-                f"[heygen] template {template_id}: no API vars — using avatar API "
-                f"(avatar_id={avatar_id[:12]}...) for personalized voice"
+                f"[heygen] template {template_id}: no API vars — avatar API "
+                f"avatar={avatar_id[:12]}... dim={eff_w}x{eff_h} voice={eff_voice!r}"
             )
             return create_heygen_avatar_video(
-                script, avatar_id, voice_id=voice_id,
-                audio_url=audio_url, orientation=orientation,
+                script, avatar_id, voice_id=eff_voice,
+                audio_url=audio_url, tmpl_w=eff_w, tmpl_h=eff_h,
             )
 
         # No avatar_id configured — generate template as-is (avatar speaks baked-in script).
